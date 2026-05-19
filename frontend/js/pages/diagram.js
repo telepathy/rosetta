@@ -117,6 +117,7 @@ function renderDiagram(container, tables, edges, modelDetails) {
     var columns = detail ? (detail.columns || []) : [];
     var height = headerH + columns.length * colH + (diagramState.mode !== 'view' ? 30 : 12);
     tableCard(svg, t, detail, columns, positions[t.id], cardW, height, headerH, colH, edges);
+  });
 
   container.innerHTML = '';
   container.appendChild(svg);
