@@ -102,7 +102,7 @@ async function pageModelDetail(params) {
 
   document.title = 'Rosetta - ' + detail.table_name;
   var html = sidebarHtml('/models') + pageHeader('📐 ' + detail.table_name, (detail.table_comment || '无注释') + ' | ' + detail.table_status);
-  html += '<div class="page-toolbar"><button class="btn btn-outline" onclick="router.navigate(\'/models\')">← 返回</button><div class="flex-spacer"></div><button class="btn btn-primary" onclick="showAddColumnModal(' + modelId + ')">+ 添加字段</button></div>';
+  html += '<div class="page-toolbar"><button class="btn btn-outline" onclick="router.navigate(\'/models\')">← 返回</button><div class="flex-spacer"></div><button class="btn btn-primary" onclick="showAddColumnModal(' + modelId + ')">+ 添加字段</button> <button class="btn btn-outline" onclick="showDeployModal(' + modelId + ')">🚀 部署</button></div>';
   html += '<div class="tabs"><button class="tab active" onclick="switchModelTab(event,\'columns\')">字段 (' + detail.columns.length + ')</button><button class="tab" onclick="switchModelTab(event,\'indexes\')">索引 (' + detail.indexes.length + ')</button><button class="tab" onclick="switchModelTab(event,\'fks\')">外键 (' + detail.foreign_keys.length + ')</button><button class="tab" onclick="switchModelTab(event,\'ddl\')">DDL 预览</button></div>';
 
   html += renderColumnsTab(detail.columns, modelId);
@@ -347,6 +347,46 @@ async function deleteFK(modelId, fkId) {
     router.navigate('/models/' + modelId);
   } catch (e) { toast(e.message, 'error'); }
 }
+
+async function showDeployModal(modelId) {
+  var schemas = [];
+  try {
+    var instances = (await api.get('/instances?page=1&page_size=50')).data.items || [];
+    for (var i = 0; i < instances.length; i++) {
+      var s = (await api.get('/instances/' + instances[i].id + '/schemas')).data;
+      if (Array.isArray(s)) {
+        s.forEach(function(sc) { schemas.push({ id: sc.id, name: instances[i].name + ' / ' + sc.schema_name, instanceId: instances[i].id }); });
+      }
+    }
+  } catch(e) {}
+
+  if (schemas.length === 0) {
+    toast('没有可用的 Schema，请先在实例管理中创建', 'error');
+    return;
+  }
+
+  var opts = schemas.map(function(s) { return '<option value="' + s.id + '" data-inst="' + s.instanceId + '">' + s.name + '</option>'; }).join('');
+
+  openModal('部署模型',
+    '<div class="form-group"><label>目标 Schema</label><select id="deploy-schema">' + opts + '</select></div>' +
+    '<div class="form-group"><label>方言</label><select id="deploy-dialect"><option value="MYSQL">MySQL</option><option value="GAUSSDB">GaussDB M</option></select></div>',
+    '<button class="btn btn-outline" onclick="closeModal()">取消</button>' +
+    '<button class="btn btn-primary" onclick="doDeploy(' + modelId + ')">部署</button>'
+  );
+}
+window.showDeployModal = showDeployModal;
+
+async function doDeploy(modelId) {
+  var schemaId = parseInt(document.getElementById('deploy-schema').value);
+  var dialect = document.getElementById('deploy-dialect').value;
+  try {
+    await api.post('/models/' + modelId + '/deploy', { schema_id: schemaId, dialect: dialect });
+    closeModal();
+    toast('部署成功', 'success');
+    router.navigate('/models/' + modelId);
+  } catch(e) { toast(e.message, 'error'); }
+}
+window.doDeploy = doDeploy;
 window.deleteFK = deleteFK;
 
 window.loadModels = loadModels;

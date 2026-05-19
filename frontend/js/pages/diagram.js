@@ -38,11 +38,29 @@ function setMode(mode) {
 async function loadSchemaOptions() {
   try {
     var schemas = [];
-    var instances = (await api.get('/instances?page=1&page_size=50')).data.items;
+    var instances = (await api.get('/instances?page=1&page_size=50')).data.items || [];
     for (var i = 0; i < instances.length; i++) {
-      var s = (await api.get('/instances/' + instances[i].id + '/schemas')).data;
-      s.forEach(function(sc) { schemas.push({ id: sc.id, name: instances[i].name + ' / ' + sc.schema_name, instanceId: instances[i].id }); });
+      try {
+        var s = (await api.get('/instances/' + instances[i].id + '/schemas')).data;
+        if (Array.isArray(s)) {
+          s.forEach(function(sc) { schemas.push({ id: sc.id, name: instances[i].name + ' / ' + sc.schema_name, instanceId: instances[i].id }); });
+        }
+      } catch(e) {}
     }
+    var sel = document.getElementById('diagram-schema');
+    sel.innerHTML = '<option value="">选择 Schema...</option>';
+    schemas.forEach(function(s) { sel.innerHTML += '<option value="' + s.id + '">' + s.name + '</option>'; });
+
+    if (schemas.length === 0) {
+      document.getElementById('diagram-container').innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><p>没有可用的 Schema</p><p style="font-size:12px;color:var(--text-secondary);margin-top:8px">请先在「实例管理」中创建实例和 Schema，然后在「模型管理」中将模型部署到 Schema</p></div>';
+    } else if (schemas.length === 1) {
+      sel.value = schemas[0].id;
+      loadDiagram();
+    }
+  } catch(e) {
+    document.getElementById('diagram-container').innerHTML = '<div class="empty-state"><p>加载失败: ' + e.message + '</p></div>';
+  }
+}
     var sel = document.getElementById('diagram-schema');
     sel.innerHTML = '<option value="">选择 Schema...</option>';
     schemas.forEach(function(s) { sel.innerHTML += '<option value="' + s.id + '">' + s.name + '</option>'; });
