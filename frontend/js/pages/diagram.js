@@ -104,6 +104,7 @@ function renderGraph(vp, tables, edges, modelDetails) {
     elements.push({ data: { id: 't' + t.id, label: label, tableId: t.id, tableName: t.table_name, nodeHeight: h }, classes: 'table-node' });
   });
   edges.forEach(function(e) {
+    if (e.source === e.target) return;
     elements.push({ data: { id: 'e_' + e.source + '_' + e.target, source: 't' + e.source, target: 't' + e.target, label: e.source_col.substring(0, 10) + ' → ' + e.target_col.substring(0, 10) } });
   });
 
