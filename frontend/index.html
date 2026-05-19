@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rosetta - 数据治理平台</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="app"></div>
+
+<div id="toast-container"></div>
+
+<div id="modal-overlay" class="modal-overlay hidden" onclick="closeModal(event)">
+  <div class="modal" id="modal-content" onclick="event.stopPropagation()"></div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/router.js"></script>
+<script src="js/app.js"></script>
+<script src="js/pages/login.js"></script>
+<script src="js/pages/users.js"></script>
+<script src="js/pages/instances.js"></script>
+<script src="js/pages/dicts.js"></script>
+<script src="js/pages/models.js"></script>
+<script>
+router.guard(async function() {
+  var token = api.getToken();
+  if (!token) return false;
+  if (!api.user) {
+    try { await api.fetchMe(); } catch (e) { return false; }
+  }
+  return true;
+});
+
+router.on('/login', pageLogin);
+router.on('/', pageDashboard);
+router.on('/users', pageUsers);
+router.on('/instances', pageInstances);
+router.on('/dicts', pageDicts);
+router.on('/models', pageModels);
+router.on('/models/:id', pageModelDetail);
+
+router.start();
+</script>
+</body>
+</html>

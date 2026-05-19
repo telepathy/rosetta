@@ -1,0 +1,23 @@
+# Binary
+rosetta-server
+
+# Database
+*.db
+*.sqlite
+
+# Logs
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+/tmp/

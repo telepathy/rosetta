@@ -1,0 +1,15 @@
+server:
+  port: 8080
+  mode: debug
+
+database:
+  type: mysql
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: rosetta123
+  dbname: rosetta
+
+jwt:
+  secret: "rosetta-jwt-secret-change-in-production"
+  expire_hours: 24

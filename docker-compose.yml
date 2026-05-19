@@ -1,0 +1,23 @@
+services:
+  mysql:
+    image: docker.m.daocloud.io/library/mysql:8.0
+    container_name: rosetta-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rosetta123
+      MYSQL_DATABASE: rosetta
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prosetta123"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  mysql_data:
