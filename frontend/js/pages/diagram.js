@@ -61,11 +61,6 @@ async function loadSchemaOptions() {
     document.getElementById('diagram-container').innerHTML = '<div class="empty-state"><p>加载失败: ' + e.message + '</p></div>';
   }
 }
-    var sel = document.getElementById('diagram-schema');
-    sel.innerHTML = '<option value="">选择 Schema...</option>';
-    schemas.forEach(function(s) { sel.innerHTML += '<option value="' + s.id + '">' + s.name + '</option>'; });
-  } catch(e) {}
-}
 
 async function loadDiagram() {
   var schemaId = document.getElementById('diagram-schema').value;
