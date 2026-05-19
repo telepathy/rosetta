@@ -14,10 +14,11 @@ async function pageDiagram() {
   html += '<button class="btn btn-sm btn-outline" onclick="fitDiagram()">⊞ 适应</button>';
   html += '<button class="btn btn-sm btn-outline" onclick="if(diagramState.cy){diagramState.cy.zoom(1);diagramState.cy.center();}">1:1</button>';
   html += '</div>';
-  html += '<div id="diagram-viewport" style="width:100%;height:calc(100vh - 200px);border:1px solid var(--border);border-radius:var(--radius);background:#fafbfc;position:relative"></div>';
+  html += '<div id="diagram-viewport" style="width:100%;height:calc(100vh - 200px);border:1px solid var(--border);border-radius:var(--radius);background:#fafbfc;position:relative">';
+  html += '<div class="empty-state"><div class="empty-icon">📊</div><p>请先选择一个 Schema 查看 ER 图</p></div>';
+  html += '</div>';
   html += '</div></div>';
-  document.getElementById('diagram-viewport').innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><p>请先选择一个 Schema 查看 ER 图</p></div>';
-  setTimeout(loadSchemaOptions, 0);
+  setTimeout(function() { loadSchemaOptions(); }, 0);
   return html;
 }
 
