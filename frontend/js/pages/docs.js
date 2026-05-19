@@ -28,7 +28,7 @@ async function fetchAllDocs() {
     for (var i = 0; i < models.length; i++) {
       try {
         var d = (await api.get('/models/' + models[i].id)).data;
-        allDetails.push(d.data);
+        allDetails.push(d);
       } catch(e) {}
     }
 

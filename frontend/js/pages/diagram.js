@@ -72,17 +72,17 @@ async function loadDiagram() {
 
   try {
     var er = (await api.get('/schemas/' + schemaId + '/er-diagram')).data;
-    if (!er.data || !er.data.tables || er.data.tables.length === 0) {
+    if (!er || !er.tables || er.tables.length === 0) {
       container.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><p>该 Schema 下没有部署的模型，请先部署模型到此 Schema</p></div>';
       return;
     }
-    var tables = er.data.tables;
-    var edges = er.data.edges || [];
+    var tables = er.tables;
+    var edges = er.edges || [];
     var modelDetails = {};
     for (var i = 0; i < tables.length; i++) {
       try {
         var d = (await api.get('/models/' + tables[i].id)).data;
-        modelDetails[tables[i].id] = d.data;
+        modelDetails[tables[i].id] = d;
       } catch(e) {}
     }
     renderDiagram(container, tables, edges, modelDetails);
