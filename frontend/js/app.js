@@ -75,6 +75,8 @@ function sidebarHtml(currentPath) {
     ['/instances', '🗄️', '实例管理'],
     ['/dicts', '📖', '字典维护'],
     ['/models', '📐', '模型管理'],
+    ['/diagram', '📊', 'ER 图'],
+    ['/docs', '📋', '文档汇编'],
     ['/help', '📖', '使用帮助'],
   ];
   var html = '<div class="app-layout"><div class="sidebar">';

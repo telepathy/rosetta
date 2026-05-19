@@ -25,6 +25,8 @@
 <script src="js/pages/dicts.js"></script>
 <script src="js/pages/models.js"></script>
 <script src="js/pages/help.js"></script>
+<script src="js/pages/diagram.js"></script>
+<script src="js/pages/docs.js"></script>
 <script>
 router.guard(async function() {
   var token = api.getToken();
@@ -43,6 +45,8 @@ router.on('/dicts', pageDicts);
 router.on('/models', pageModels);
 router.on('/models/:id', pageModelDetail);
 router.on('/help', pageHelp);
+router.on('/diagram', pageDiagram);
+router.on('/docs', pageDocs);
 
 router.start();
 </script>
