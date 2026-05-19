@@ -331,55 +331,35 @@ CREATE TABLE `user_order` (
 
 ### 4.3 表结构可视化
 
-#### 4.3.1 单表结构图
+#### 4.3.1 ER 图（`#/diagram`）
 
-以卡片形式展示一张表的完整结构，适合快速理解：
+使用 **Cytoscape.js**（本地 vendored，664KB）渲染 Schema 级 ER 图：
 
-```
-                 ┌── user_order ──────────────┐
-                 │                             │
-                 │  🔑 id          BIGINT     │
-                 │     user_id     BIGINT  FK │
-                 │     amount      DECIMAL(18,2)│
-                 │     status      VARCHAR(32)│
-                 │     created_at  DATETIME   │
-                 │     updated_at  DATETIME   │
-                 │                             │
-                 │  📋 idx_user_id (user_id)  │
-                 │  📋 idx_created_at (created)│
-                 └─────────────────────────────┘
-```
+- **自动布局**：`breadthfirst` 算法，有向图分层排列，根表在左，被引用表在右
+- **表节点**：圆角矩形卡片，显示表名、列数、字段列表（字段名+类型+PK/FK 标记）
+- **关系连线**：贝塞尔曲线 + 箭头 + 列名标签，自引用边自动跳过
+- **缩放平移**：滚轮缩放 + 拖拽平移，Cytoscape 原生支持
+- **点击交互**：浏览模式下点击表节点跳转到模型详情页
+- **编辑模式**：支持 FK 模式下点击两个表创建外键关系
+- **高度计算**：根据字段数量动态计算节点高度（替代已废弃的 `height: 'label'`）
 
-**实现方案**：使用 AntV G6 自定义节点，矩形卡片内嵌字段列表。主键标记 🔑，外键标记 FK。
+#### 4.3.2 结构图 API
 
-#### 4.3.2 Schema 级 ER 图
+后端提供可视化数据 API：
 
-展示一个 Schema 下所有表及其外键关系：
+| 端点 | 说明 |
+|------|------|
+| `GET /api/models/:id/structure-diagram` | 单表结构数据（字段+PK/FK标记+索引+外键） |
+| `GET /api/schemas/:id/er-diagram` | Schema ER 图数据（tables + edges） |
 
-```
-  ┌── user_info ──────┐          ┌── user_order ────────┐
-  │ 🔑 id             │──────────│    user_id    FK     │
-  │    name           │  1:N     │ 🔑 id                │
-  │    phone          │          │    amount             │
-  └───────────────────┘          │    status             │
-                                 └───────────────────────┘
-                                           │
-                                           │ 1:N
-                                           ↓
-                                 ┌── order_item ─────────┐
-                                 │    order_id    FK     │
-                                 │ 🔑 id                 │
-                                 │    product_name       │
-                                 │    quantity           │
-                                 └───────────────────────┘
-```
+#### 4.3.3 数据库文档汇编页（`#/docs`）
 
-**实现方案**：
-- AntV G6 `dagre` 布局自动排列，无需手动调整节点位置
-- 连线方向从外键表指向主键表
-- 节点可点击跳转到表结构编辑器
-- 连线粗细代表引用频率（该外键被多少其他表引用）
-- 工具栏：缩放、适应画布、导出图片、按 Schema 筛选
+以数据字典形式展示所有模型的完整参考文档：
+- 表名、备注、状态
+- 字段列表（序号、字段名、类型、非空、主键、默认值、备注）
+- 索引和外键详情
+- 可折叠的 DDL 预览
+- 支持浏览器打印
 
 ---
 
@@ -869,16 +849,14 @@ function hasPermission(userId, modelId, requiredPermission):
 
 | 能力 | 选型 | 版本 | 理由 |
 |------|------|------|------|
-| 框架 | React | 18 | - |
-| 构建 | Vite | 5 | 快速 HMR |
-| UI 组件库 | Ant Design | 5 | Tree/Table/Form/Tabs 全内置，企业后台标配 |
-| 可视化 | AntV G6 | 5 | ER 图、单表结构图，dagre 自动布局 |
-| 代码高亮 | react-syntax-highlighter | - | DDL 预览面板 SQL 高亮 |
-| 拖拽 | @dnd-kit/core | - | 字段排序、树拖拽 |
-| 状态管理 | Zustand | - | 轻量，适合中等复杂度 |
-| HTTP | axios + @tanstack/react-query | - | 自动缓存、刷新 |
-| 路由 | React Router | 6 | - |
-| 图标 | @ant-design/icons | - | 与 Ant Design 风格统一 |
+| 实现方式 | 原生 JS | ES5 | 零框架依赖，单页应用，直接操作 DOM |
+| 样式 | 原生 CSS | - | CSS 变量主题系统，侧边栏/表格/弹窗/Toast |
+| 路由 | 自研 Hash Router | - | 正则匹配路由，路由守卫，SPA 回退 |
+| HTTP | Fetch API | - | 浏览器原生，封装 token 管理 |
+| 可视化 | Cytoscape.js | 3.30.4 | ER 图自动布局（breadthfirst），本地 vendored，664KB |
+| ER 布局 | breadthfirst | 内置 | 有向图分层布局，避免 dagre 插件的 bundler 依赖 |
+| DDL 展示 | 原生 `<pre>` 标签 | - | CSS 模拟深色终端风格 |
+| 图标 | Emoji | - | 简洁直观，无外部依赖 |
 
 ### 7.3 部署
 
@@ -1002,3 +980,51 @@ function hasPermission(userId, modelId, requiredPermission):
 | 数据血缘 | P1 | P2 |
 | 数据库方言 | 仅提及 MySQL、Hive | GaussDB M + MySQL，含完整映射差异表 |
 | 交付周期 | 6 个月（四阶段） | 4 周 MVP（聚焦 UI 可操作的闭环） |
+
+---
+
+## 附录 C：Cytoscape.js 本地化方案
+
+### 为什么不用 CDN
+
+1. CDN 可能被墙或加载超时，导致页面白屏
+2. `cytoscape-dagre` 插件是 webpack 打包产物，依赖 `require("dagre")`，在普通 `<script>` 标签下不工作
+
+### 最终方案
+
+```
+frontend/js/vendor/
+├── cytoscape.min.js    (365KB) — 从 jsdelivr CDN 下载到本地
+├── dagre.min.js        (278KB) — 已废弃，breadthfirst 布局不需要
+└── cytoscape-dagre.js   (13KB) — 已废弃，不兼容浏览器环境
+```
+
+- 使用 Cytoscape.js 内置的 `breadthfirst` 布局，零外部布局依赖
+- 适合有向图（FK 关系有明确方向），自动分层排列
+- 自引用边（`product_category.parent_id → product_category.id`）自动跳过
+
+### 节点高度计算
+
+Cytoscape v3.30+ 废弃了 `height: 'label'`，改为根据标签行数动态计算：
+
+```js
+'height': function(ele) { return ele.data('nodeHeight') || 200; }
+// nodeHeight = 标签行数 * 18 + 24 (padding)
+```
+
+## 附录 D：100 表 Dummy ERP 系统
+
+```bash
+cd backend && ./rosetta-server --seed-dummy
+```
+
+| 域 | 表数 | 典型示例 |
+|----|:--:|----------|
+| 电商 | 20 | product, order, order_item, inventory, coupon, refund |
+| CRM | 17 | customer, account, contact, lead, opportunity, contract |
+| 财务 | 15 | gl_account, gl_journal, ap_invoice, ar_invoice, budget |
+| HR | 17 | employee, department, position, salary, attendance, payroll |
+| 物流 | 15 | warehouse, stock, shipment, purchase_order, receiving |
+| 分析 | 17 | report_config, dashboard, kpi_definition, etl_job, data_lineage |
+
+首次运行创建 101 张表、582 个字段、103 个外键，全部部署到 `dummy_erp` Schema。
