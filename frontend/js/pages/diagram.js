@@ -1,10 +1,16 @@
+var diagramState = { mode: 'view', schemaId: null, dragInfo: null, fkSource: null, panStart: null, panScroll: null };
+
 async function pageDiagram() {
   document.title = 'Rosetta - ER 图';
   var html = sidebarHtml('/diagram');
-  html += '<div class="page-header"><h2>📊 数据库模型图</h2><div class="page-desc">表结构与关系可视化 ｜ 点击表卡片进入详情</div></div>';
+  html += '<div class="page-header"><h2>📊 数据库模型图</h2><div class="page-desc">所见即所得编辑 ｜ 拖拽移动表 ｜ 点击列编辑 ｜ 连线建立外键</div></div>';
   html += '<div class="page-toolbar">';
   html += '<select id="diagram-schema" onchange="loadDiagram()"><option value="">选择 Schema...</option></select>';
   html += '<div class="flex-spacer"></div>';
+  html += '<button id="btn-mode-view" class="btn btn-sm btn-primary" onclick="setMode(\'view\')">👁 浏览</button>';
+  html += '<button id="btn-mode-edit" class="btn btn-sm btn-outline" onclick="setMode(\'edit\')">✏️ 编辑</button>';
+  html += '<button id="btn-mode-fk" class="btn btn-sm btn-outline" onclick="setMode(\'fk\')">🔗 建外键</button>';
+  html += '<button id="btn-add-table" class="btn btn-sm btn-primary hidden" onclick="addTableOnDiagram()">+ 新表</button>';
   html += '<button class="btn btn-sm btn-outline" onclick="zoomDiagram(0.2)">🔍+</button>';
   html += '<button class="btn btn-sm btn-outline" onclick="zoomDiagram(-0.2)">🔍-</button>';
   html += '<button class="btn btn-sm btn-outline" onclick="resetZoom()">重置</button>';
@@ -13,9 +19,20 @@ async function pageDiagram() {
   html += '<div class="empty-state"><div class="empty-icon">📊</div><p>请先选择一个 Schema 查看 ER 图</p></div>';
   html += '</div>';
   html += '</div></div>';
-
   setTimeout(loadSchemaOptions, 0);
   return html;
+}
+
+function setMode(mode) {
+  diagramState.mode = mode;
+  diagramState.fkSource = null;
+  ['view','edit','fk'].forEach(function(m) {
+    var btn = document.getElementById('btn-mode-' + m);
+    if (btn) btn.className = 'btn btn-sm ' + (m === mode ? 'btn-primary' : 'btn-outline');
+  });
+  var addBtn = document.getElementById('btn-add-table');
+  if (addBtn) addBtn.classList.toggle('hidden', mode === 'view');
+  if (diagramState.schemaId) loadDiagram();
 }
 
 async function loadSchemaOptions() {
@@ -27,15 +44,15 @@ async function loadSchemaOptions() {
       s.forEach(function(sc) { schemas.push({ id: sc.id, name: instances[i].name + ' / ' + sc.schema_name, instanceId: instances[i].id }); });
     }
     var sel = document.getElementById('diagram-schema');
-    schemas.forEach(function(s) {
-      sel.innerHTML += '<option value="' + s.id + '">' + s.name + '</option>';
-    });
+    sel.innerHTML = '<option value="">选择 Schema...</option>';
+    schemas.forEach(function(s) { sel.innerHTML += '<option value="' + s.id + '">' + s.name + '</option>'; });
   } catch(e) {}
 }
 
 async function loadDiagram() {
   var schemaId = document.getElementById('diagram-schema').value;
   if (!schemaId) return;
+  diagramState.schemaId = schemaId;
 
   var container = document.getElementById('diagram-container');
   container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-secondary)">加载中...</div>';
@@ -43,13 +60,11 @@ async function loadDiagram() {
   try {
     var er = (await api.get('/schemas/' + schemaId + '/er-diagram')).data;
     if (!er.data || !er.data.tables || er.data.tables.length === 0) {
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><p>该 Schema 下没有部署的模型</p></div>';
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><p>该 Schema 下没有部署的模型，请先部署模型到此 Schema</p></div>';
       return;
     }
-
     var tables = er.data.tables;
     var edges = er.data.edges || [];
-
     var modelDetails = {};
     for (var i = 0; i < tables.length; i++) {
       try {
@@ -57,185 +72,322 @@ async function loadDiagram() {
         modelDetails[tables[i].id] = d.data;
       } catch(e) {}
     }
-
-    renderDiagramSVG(container, tables, edges, modelDetails);
+    renderDiagram(container, tables, edges, modelDetails);
   } catch(e) {
     container.innerHTML = '<div class="empty-state"><p>加载失败: ' + e.message + '</p></div>';
   }
 }
 
-function renderDiagramSVG(container, tables, edges, modelDetails) {
-  var cardW = 280, cardH = 40, headerH = 36, colH = 24, padX = 40, padY = 60;
+function renderDiagram(container, tables, edges, modelDetails) {
+  var cardW = 300, colH = 26, padX = 40, padY = 60;
   var cols = Math.max(1, Math.floor(Math.min(3, Math.ceil(Math.sqrt(tables.length)))));
   var positions = {};
-
   tables.forEach(function(t, i) {
     var col = i % cols, row = Math.floor(i / cols);
-    positions[t.id] = { x: padX + col * (cardW + padX), y: padY + row * (cardH + padY + 60) };
+    positions[t.id] = { x: padX + col * (cardW + padX), y: padY + row * 200 };
   });
+  var headerH = diagramState.mode === 'view' ? 32 : 42;
 
-  var totalH = 0;
+  var totalH = 0, totalW = 0;
   tables.forEach(function(t) {
-    var cols = (modelDetails[t.id] && modelDetails[t.id].columns) ? modelDetails[t.id].columns.length : 0;
-    var h = headerH + cols * colH + 8;
-    var p = positions[t.id];
-    totalH = Math.max(totalH, p.y + h + padY);
+    var detail = modelDetails[t.id];
+    var colCount = detail ? (detail.columns ? detail.columns.length : 0) : 0;
+    var h = headerH + colCount * colH + (diagramState.mode !== 'view' ? 30 : 12);
+    var p = positions[t.id]; totalH = Math.max(totalH, p.y + h + padY);
   });
-  var totalW = cols * (cardW + padX) + padX;
+  totalW = cols * (cardW + padX) + padX;
 
   var svgNS = 'http://www.w3.org/2000/svg';
   var svg = document.createElementNS(svgNS, 'svg');
-  svg.setAttribute('width', totalW);
-  svg.setAttribute('height', totalH);
-  svg.setAttribute('id', 'diagram-svg');
-  svg.style.minWidth = totalW + 'px';
+  svg.setAttribute('width', Math.max(totalW, 1200)); svg.setAttribute('height', Math.max(totalH, 600));
+  svg.setAttribute('id', 'diagram-svg'); svg.style.minWidth = Math.max(totalW, 1200) + 'px';
 
   var defs = document.createElementNS(svgNS, 'defs');
   var marker = document.createElementNS(svgNS, 'marker');
-  marker.setAttribute('id', 'arrowhead');
-  marker.setAttribute('markerWidth', '8');
-  marker.setAttribute('markerHeight', '6');
-  marker.setAttribute('refX', '8');
-  marker.setAttribute('refY', '3');
-  marker.setAttribute('orient', 'auto');
-  var arrowPath = document.createElementNS(svgNS, 'path');
-  arrowPath.setAttribute('d', 'M0,0 L8,3 L0,6 Z');
-  arrowPath.setAttribute('fill', '#94a3b8');
-  marker.appendChild(arrowPath);
-  defs.appendChild(marker);
-  svg.appendChild(defs);
+  marker.setAttribute('id', 'arrowhead'); marker.setAttribute('markerWidth', '8'); marker.setAttribute('markerHeight', '6');
+  marker.setAttribute('refX', '8'); marker.setAttribute('refY', '3'); marker.setAttribute('orient', 'auto');
+  var ap = document.createElementNS(svgNS, 'path'); ap.setAttribute('d', 'M0,0 L8,3 L0,6 Z'); ap.setAttribute('fill', '#94a3b8');
+  marker.appendChild(ap); defs.appendChild(marker); svg.appendChild(defs);
 
-  var groups = {};
+  var edgePaths = buildEdgePaths(edges, positions, modelDetails, headerH, colH);
+  edgePaths.forEach(function(ep) { svg.appendChild(ep); });
+
   tables.forEach(function(t) {
-    var p = positions[t.id];
     var detail = modelDetails[t.id];
     var columns = detail ? (detail.columns || []) : [];
-    var height = headerH + columns.length * colH + 8;
-    var g = document.createElementNS(svgNS, 'g');
-    g.setAttribute('transform', 'translate(' + p.x + ',' + p.y + ')');
-    g.setAttribute('class', 'er-table-group');
-    g.style.cursor = 'pointer';
-    g.addEventListener('click', function() { router.navigate('/models/' + t.id); });
-
-    var r = document.createElementNS(svgNS, 'rect');
-    r.setAttribute('x', '0'); r.setAttribute('y', '0');
-    r.setAttribute('width', cardW); r.setAttribute('height', height);
-    r.setAttribute('rx', '6'); r.setAttribute('ry', '6');
-    r.setAttribute('fill', '#fff'); r.setAttribute('stroke', '#cbd5e1'); r.setAttribute('stroke-width', '1.5');
-    r.setAttribute('filter', 'drop-shadow(0 1px 2px rgba(0,0,0,0.06))');
-    g.appendChild(r);
-
-    var headerR = document.createElementNS(svgNS, 'rect');
-    headerR.setAttribute('x', '1'); headerR.setAttribute('y', '1');
-    headerR.setAttribute('width', cardW - 2); headerR.setAttribute('height', headerH - 2);
-    headerR.setAttribute('rx', '5'); headerR.setAttribute('ry', '5');
-    headerR.setAttribute('fill', '#4f46e5');
-    g.appendChild(headerR);
-
-    var headerR2 = document.createElementNS(svgNS, 'rect');
-    headerR2.setAttribute('x', '1'); headerR2.setAttribute('y', headerH - 4);
-    headerR2.setAttribute('width', cardW - 2); headerR2.setAttribute('height', '4');
-    headerR2.setAttribute('fill', '#4f46e5');
-    g.appendChild(headerR2);
-
-    var title = document.createElementNS(svgNS, 'text');
-    title.setAttribute('x', '12'); title.setAttribute('y', '24');
-    title.setAttribute('fill', '#fff'); title.setAttribute('font-size', '13'); title.setAttribute('font-weight', '600');
-    title.textContent = t.table_name;
-    g.appendChild(title);
-
-    if (t.column_count > 0) {
-      var countBadge = document.createElementNS(svgNS, 'text');
-      countBadge.setAttribute('x', cardW - 12); countBadge.setAttribute('y', '24');
-      countBadge.setAttribute('fill', 'rgba(255,255,255,0.7)'); countBadge.setAttribute('font-size', '11'); countBadge.setAttribute('text-anchor', 'end');
-      countBadge.textContent = t.column_count + ' cols';
-      g.appendChild(countBadge);
-    }
-
-    columns.forEach(function(col, ci) {
-      var cy = headerH + 4 + ci * colH + colH / 2 + 2;
-
-      if (col.is_primary_key) {
-        var pk = document.createElementNS(svgNS, 'text');
-        pk.setAttribute('x', '10'); pk.setAttribute('y', cy);
-        pk.setAttribute('fill', '#f59e0b'); pk.setAttribute('font-size', '10');
-        pk.textContent = '🔑';
-        g.appendChild(pk);
-      }
-
-      var fkCol = false;
-      edges.forEach(function(e) {
-        if (e.source === t.id && e.source_col === col.column_name) fkCol = true;
-      });
-      if (fkCol) {
-        var fk = document.createElementNS(svgNS, 'text');
-        fk.setAttribute('x', '28'); fk.setAttribute('y', cy);
-        fk.setAttribute('fill', '#4f46e5'); fk.setAttribute('font-size', '9');
-        fk.textContent = 'FK';
-        g.appendChild(fk);
-      }
-
-      var colName = document.createElementNS(svgNS, 'text');
-      var colX = fkCol ? 46 : 28;
-      colName.setAttribute('x', colX); colName.setAttribute('y', cy);
-      colName.setAttribute('fill', '#334155'); colName.setAttribute('font-size', '11'); colName.setAttribute('font-weight', '500');
-      colName.textContent = col.column_name;
-      g.appendChild(colName);
-
-      var typeStr = col.logical_type + ((col.type_length) ? '(' + col.type_length + (col.type_scale ? ',' + col.type_scale : '') + ')' : '');
-      var colType = document.createElementNS(svgNS, 'text');
-      colType.setAttribute('x', cardW - 10); colType.setAttribute('y', cy);
-      colType.setAttribute('fill', '#94a3b8'); colType.setAttribute('font-size', '10'); colType.setAttribute('text-anchor', 'end');
-      colType.textContent = typeStr;
-      g.appendChild(colType);
-    });
-
-    groups[t.id] = { g: g, cols: columns, pos: p, headerH: headerH, colH: colH };
-    svg.appendChild(g);
-  });
-
-  edges.forEach(function(e) {
-    if (!positions[e.source] || !positions[e.target]) return;
-    var src = groups[e.source], tgt = groups[e.target];
-    if (!src || !tgt) return;
-
-    var srcColIdx = -1, tgtColIdx = -1;
-    src.cols.forEach(function(c, i) { if (c.column_name === e.source_col) srcColIdx = i; });
-    tgt.cols.forEach(function(c, i) { if (c.column_name === e.target_col) tgtColIdx = i; });
-
-    var srcY = src.pos.y + src.headerH + 4 + (srcColIdx >= 0 ? srcColIdx : 0) * src.colH + src.colH / 2 + 2;
-    var tgtY = tgt.pos.y + tgt.headerH + 4 + (tgtColIdx >= 0 ? tgtColIdx : 0) * tgt.colH + tgt.colH / 2 + 2;
-
-    var srcX = src.pos.x + 280;
-    var tgtX = tgt.pos.x;
-
-    var path = document.createElementNS(svgNS, 'path');
-    var mx = (srcX + tgtX) / 2;
-    var d = 'M' + srcX + ',' + srcY + ' C' + mx + ',' + srcY + ' ' + mx + ',' + tgtY + ' ' + tgtX + ',' + tgtY;
-    path.setAttribute('d', d);
-    path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', '#94a3b8');
-    path.setAttribute('stroke-width', '1.5');
-    path.setAttribute('marker-end', 'url(#arrowhead)');
-    svg.appendChild(path);
-
-    var labelBg = document.createElementNS(svgNS, 'rect');
-    var labelX = mx - 30, labelY = (srcY + tgtY) / 2 - 8;
-    labelBg.setAttribute('x', labelX); labelBg.setAttribute('y', labelY);
-    labelBg.setAttribute('width', '60'); labelBg.setAttribute('height', '16');
-    labelBg.setAttribute('rx', '4'); labelBg.setAttribute('fill', '#f1f5f9'); labelBg.setAttribute('stroke', '#e2e8f0');
-    svg.appendChild(labelBg);
-
-    var label = document.createElementNS(svgNS, 'text');
-    label.setAttribute('x', mx); label.setAttribute('y', (srcY + tgtY) / 2 + 3);
-    label.setAttribute('fill', '#64748b'); label.setAttribute('font-size', '9'); label.setAttribute('text-anchor', 'middle');
-    label.textContent = e.source_col + '→' + e.target_col;
-    svg.appendChild(label);
-  });
+    var height = headerH + columns.length * colH + (diagramState.mode !== 'view' ? 30 : 12);
+    tableCard(svg, t, detail, columns, positions[t.id], cardW, height, headerH, colH, edges);
 
   container.innerHTML = '';
   container.appendChild(svg);
+
+  if (diagramState.mode !== 'view') setupDrag(container);
   window._diagramZoom = 1;
+  window._diagramContainer = container;
+}
+
+function buildEdgePaths(edges, positions, modelDetails, headerH, colH) {
+  var svgNS = 'http://www.w3.org/2000/svg';
+  var result = [];
+  edges.forEach(function(e) {
+    if (!positions[e.source] || !positions[e.target]) return;
+    var sp = positions[e.source], tp = positions[e.target];
+    var srcDetail = modelDetails[e.source], tgtDetail = modelDetails[e.target];
+    var srcCols = srcDetail ? (srcDetail.columns || []) : [];
+    var tgtCols = tgtDetail ? (tgtDetail.columns || []) : [];
+    var si = srcCols.findIndex(function(c) { return c.column_name === e.source_col; });
+    var ti = tgtCols.findIndex(function(c) { return c.column_name === e.target_col; });
+    var srcY = sp.y + headerH + 4 + (si >= 0 ? si : 0) * colH + colH / 2 + 2;
+    var tgtY = tp.y + headerH + 4 + (ti >= 0 ? ti : 0) * colH + colH / 2 + 2;
+    var sx = sp.x + 300, tx = tp.x;
+    var mx = (sx + tx) / 2;
+    var path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('d', 'M' + sx + ',' + srcY + ' C' + mx + ',' + srcY + ' ' + mx + ',' + tgtY + ' ' + tx + ',' + tgtY);
+    path.setAttribute('fill', 'none'); path.setAttribute('stroke', '#94a3b8'); path.setAttribute('stroke-width', '1.5');
+    path.setAttribute('marker-end', 'url(#arrowhead)');
+    result.push(path);
+    var lb = document.createElementNS(svgNS, 'rect');
+    var lx = mx - 32, ly = (srcY + tgtY) / 2 - 8;
+    lb.setAttribute('x', lx); lb.setAttribute('y', ly); lb.setAttribute('width', '64'); lb.setAttribute('height', '16');
+    lb.setAttribute('rx', '4'); lb.setAttribute('fill', '#f1f5f9'); lb.setAttribute('stroke', '#e2e8f0');
+    result.push(lb);
+    var lt = document.createElementNS(svgNS, 'text');
+    lt.setAttribute('x', mx); lt.setAttribute('y', (srcY + tgtY) / 2 + 3);
+    lt.setAttribute('fill', '#64748b'); lt.setAttribute('font-size', '9'); lt.setAttribute('text-anchor', 'middle');
+    lt.textContent = (e.source_col.length > 8 ? e.source_col.slice(0,8) : e.source_col) + '→' + (e.target_col.length > 8 ? e.target_col.slice(0,8) : e.target_col);
+    result.push(lt);
+  });
+  return result;
+}
+
+function tableCard(svg, t, detail, columns, pos, cardW, height, headerH, colH, edges) {
+  var svgNS = 'http://www.w3.org/2000/svg';
+  var g = document.createElementNS(svgNS, 'g');
+  g.setAttribute('transform', 'translate(' + pos.x + ',' + pos.y + ')');
+  g.setAttribute('data-table-id', t.id);
+  g.classList.add('er-table-group');
+
+  var bg = svgRect(svgNS, 0, 0, cardW, height, 6, '#fff', '#cbd5e1', 1.5);
+  g.appendChild(bg);
+
+  var hbg = svgRect(svgNS, 1, 1, cardW - 2, headerH - 2, 5, '#4f46e5');
+  g.appendChild(hbg);
+  var hbg2 = svgRect(svgNS, 1, headerH - 4, cardW - 2, 4, 0, '#4f46e5');
+  g.appendChild(hbg2);
+
+  var title = svgText(svgNS, 12, 22, '#fff', 13, '600', t.table_name);
+  g.appendChild(title);
+
+  if (diagramState.mode !== 'view') {
+    var editBtn = svgText(svgNS, cardW - 60, 22, 'rgba(255,255,255,0.8)', 11, 'normal', '✏️编辑');
+    editBtn.style.cursor = 'pointer';
+    editBtn.addEventListener('click', function(ev) { ev.stopPropagation(); editTableName(t.id); });
+    g.appendChild(editBtn);
+  }
+
+  columns.forEach(function(col, ci) {
+    var cy = headerH + 4 + ci * colH + colH / 2 + 2;
+
+    if (col.is_primary_key) {
+      g.appendChild(svgText(svgNS, 8, cy, '#f59e0b', 10, 'normal', '🔑'));
+    }
+
+    var isFK = false;
+    edges.forEach(function(e) { if (e.source === t.id && e.source_col === col.column_name) isFK = true; });
+    var colX = 26;
+    if (isFK) {
+      g.appendChild(svgText(svgNS, 24, cy, '#4f46e5', 9, '600', 'FK'));
+      colX = 46;
+    }
+
+    g.appendChild(svgText(svgNS, colX, cy, '#334155', 11, '500', col.column_name));
+
+    var typeStr = col.logical_type + (col.type_length ? '(' + col.type_length + (col.type_scale ? ',' + col.type_scale : '') + ')' : '');
+    g.appendChild(svgText(svgNS, cardW - 10, cy, '#94a3b8', 10, 'normal', typeStr, 'end'));
+
+    if (diagramState.mode === 'edit') {
+      var editIcon = svgText(svgNS, cardW - 72, cy, '#94a3b8', 10, 'normal', '✎');
+      editIcon.style.cursor = 'pointer';
+      (function(mid, colId) {
+        editIcon.addEventListener('click', function(ev) { ev.stopPropagation(); editColumnOnDiagram(mid, colId); });
+      })(t.id, col.id);
+      g.appendChild(editIcon);
+    }
+
+    if (diagramState.mode === 'fk') {
+      var fkDot = document.createElementNS(svgNS, 'circle');
+      fkDot.setAttribute('cx', cardW - 80); fkDot.setAttribute('cy', cy);
+      fkDot.setAttribute('r', '6'); fkDot.setAttribute('fill', '#e2e8f0'); fkDot.setAttribute('stroke', '#94a3b8');
+      fkDot.style.cursor = 'pointer';
+      (function(mid, colName) {
+        fkDot.addEventListener('click', function(ev) { ev.stopPropagation(); startFK(mid, colName); });
+        fkDot.addEventListener('mouseenter', function() { fkDot.setAttribute('fill', '#4f46e5'); });
+        fkDot.addEventListener('mouseleave', function() { fkDot.setAttribute('fill', diagramState.fkSource && diagramState.fkSource.modelId === mid && diagramState.fkSource.colName === colName ? '#f59e0b' : '#e2e8f0'); });
+      })(t.id, col.column_name);
+      g.appendChild(fkDot);
+    }
+  });
+
+  if (diagramState.mode === 'edit') {
+    var addY = headerH + columns.length * colH + 16;
+    var addBg = svgRect(svgNS, 4, addY - 4, cardW - 8, 24, 4, '#f8fafc', 'transparent', 0);
+    g.appendChild(addBg);
+    var addTxt = svgText(svgNS, cardW / 2, addY + 8, '#94a3b8', 11, 'normal', '+ 添加字段', 'middle');
+    addTxt.style.cursor = 'pointer';
+    (function(mid) {
+      addTxt.addEventListener('click', function(ev) { ev.stopPropagation(); addColumnOnDiagram(mid); });
+      addBg.addEventListener('click', function(ev) { ev.stopPropagation(); addColumnOnDiagram(mid); });
+    })(t.id);
+    g.appendChild(addTxt);
+  }
+
+  g.addEventListener('click', function() {
+    if (diagramState.mode === 'view') router.navigate('/models/' + t.id);
+  });
+
+  svg.appendChild(g);
+}
+
+var colTypes = ['BIGINT','INT','VARCHAR','DECIMAL','FLOAT','DOUBLE','DATE','DATETIME','TIMESTAMP','TEXT','BOOLEAN','JSON'];
+
+function editColumnOnDiagram(modelId, colId) {
+  var promptText = '编辑字段 (格式: 字段名,类型,备注)\n类型选: ' + colTypes.join(',');
+  var input = prompt(promptText);
+  if (!input) return;
+  var parts = input.split(',').map(function(s) { return s.trim(); });
+  if (parts.length < 1 || !parts[0]) return;
+
+  api.get('/models/' + modelId).then(function(r) {
+    var cols = r.data.columns || [];
+    var col = cols.find(function(c) { return c.id === colId; });
+    if (!col) { toast('字段未找到', 'error'); return; }
+    col.column_name = parts[0];
+    if (parts[1]) col.logical_type = parts[1].toUpperCase();
+    if (parts[2]) col.comment = parts[2];
+    api.put('/models/' + modelId + '/columns', { columns: cols }).then(function() {
+      toast('字段已更新', 'success'); loadDiagram();
+    }).catch(function(e) { toast(e.message, 'error'); });
+  });
+}
+
+function addColumnOnDiagram(modelId) {
+  var input = prompt('添加字段\n格式: 字段名,类型,备注\n类型选: ' + colTypes.join(','));
+  if (!input) return;
+  var parts = input.split(',').map(function(s) { return s.trim(); });
+  if (parts.length < 2 || !parts[0] || !parts[1]) { toast('至少需要字段名和类型', 'error'); return; }
+
+  api.get('/models/' + modelId).then(function(r) {
+    var cols = r.data.columns || [];
+    cols.push({
+      ordinal: cols.length + 1, column_name: parts[0],
+      logical_type: parts[1].toUpperCase(),
+      nullable: true, is_primary_key: false, default_value: '',
+      comment: parts[2] || '', type_length: null, type_scale: null
+    });
+    api.put('/models/' + modelId + '/columns', { columns: cols }).then(function() {
+      toast('字段已添加', 'success'); loadDiagram();
+    }).catch(function(e) { toast(e.message, 'error'); });
+  });
+}
+
+function editTableName(modelId) {
+  var input = prompt('编辑表名和备注\n格式: 表名,备注');
+  if (!input) return;
+  var parts = input.split(',').map(function(s) { return s.trim(); });
+  api.get('/models/' + modelId).then(function(r) {
+    api.put('/models/' + modelId, {
+      table_name: parts[0] || r.data.table_name,
+      table_comment: parts[1] || '',
+      table_status: r.data.table_status
+    }).then(function() {
+      toast('已更新', 'success'); loadDiagram();
+    }).catch(function(e) { toast(e.message, 'error'); });
+  });
+}
+
+function startFK(modelId, colName) {
+  if (!diagramState.fkSource) {
+    diagramState.fkSource = { modelId: modelId, colName: colName };
+    toast('已选择 ' + colName + ' 作为外键源，请点击目标列', 'info');
+  } else {
+    completeFK(modelId, colName);
+  }
+}
+
+function completeFK(modelId, colName) {
+  var src = diagramState.fkSource;
+  diagramState.fkSource = null;
+  if (src.modelId === modelId && src.colName === colName) { toast('不能引用自身', 'error'); return; }
+
+  var fkName = 'fk_' + src.colName;
+  api.post('/models/' + src.modelId + '/foreign-keys', {
+    fk_name: fkName, column_name: src.colName,
+    ref_model_id: modelId, ref_column_name: colName
+  }).then(function() {
+    toast('外键 ' + fkName + ' 已创建', 'success'); loadDiagram();
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function addTableOnDiagram() {
+  var input = prompt('新建模型\n格式: 表名,备注');
+  if (!input) return;
+  var parts = input.split(',').map(function(s) { return s.trim(); });
+  if (!parts[0]) { toast('请输入表名', 'error'); return; }
+  api.post('/models', { table_name: parts[0], table_comment: parts[1] || '' }).then(function(r) {
+    var modelId = r.data.id;
+    api.post('/models/' + modelId + '/deploy', { schema_id: parseInt(diagramState.schemaId), dialect: 'MYSQL' }).then(function() {
+      toast('模型已创建并部署', 'success'); loadDiagram();
+    }).catch(function() {
+      toast('模型已创建，请手动部署到 Schema', 'success'); loadDiagram();
+    });
+  }).catch(function(e) { toast(e.message, 'error'); });
+}
+
+function setupDrag(container) {
+  var svg = document.getElementById('diagram-svg');
+  if (!svg) return;
+
+  container.addEventListener('mousedown', function(e) {
+    if (diagramState.mode === 'view') return;
+    var target = e.target.closest('.er-table-group');
+    if (target) {
+      var tableId = target.getAttribute('data-table-id');
+      var m = target.getAttribute('transform').match(/translate\(([\d.]+),\s*([\d.]+)\)/);
+      if (!m) return;
+      diagramState.dragInfo = { elem: target, tableId: tableId, sx: e.clientX, sy: e.clientY, ox: parseFloat(m[1]), oy: parseFloat(m[2]) };
+      e.preventDefault();
+    }
+  });
+
+  container.addEventListener('mousemove', function(e) {
+    if (!diagramState.dragInfo) return;
+    var dx = e.clientX - diagramState.dragInfo.sx, dy = e.clientY - diagramState.dragInfo.sy;
+    diagramState.dragInfo.elem.setAttribute('transform', 'translate(' + (diagramState.dragInfo.ox + dx) + ',' + (diagramState.dragInfo.oy + dy) + ')');
+  });
+
+  container.addEventListener('mouseup', function() { diagramState.dragInfo = null; });
+  container.addEventListener('mouseleave', function() { diagramState.dragInfo = null; });
+}
+
+function svgRect(ns, x, y, w, h, r, fill, stroke, sw) {
+  var rect = document.createElementNS(ns, 'rect');
+  rect.setAttribute('x', x); rect.setAttribute('y', y);
+  rect.setAttribute('width', w); rect.setAttribute('height', h);
+  if (r > 0) { rect.setAttribute('rx', r); rect.setAttribute('ry', r); }
+  rect.setAttribute('fill', fill || '#fff');
+  if (stroke) rect.setAttribute('stroke', stroke);
+  if (sw) rect.setAttribute('stroke-width', sw);
+  return rect;
+}
+
+function svgText(ns, x, y, fill, size, weight, content, anchor) {
+  var t = document.createElementNS(ns, 'text');
+  t.setAttribute('x', x); t.setAttribute('y', y);
+  t.setAttribute('fill', fill); t.setAttribute('font-size', size);
+  t.setAttribute('font-weight', weight || 'normal');
+  if (anchor) t.setAttribute('text-anchor', anchor);
+  t.textContent = content;
+  return t;
 }
 
 function zoomDiagram(delta) {
@@ -251,5 +403,12 @@ function resetZoom() {
 }
 
 window.loadDiagram = loadDiagram;
+window.setMode = setMode;
 window.zoomDiagram = zoomDiagram;
 window.resetZoom = resetZoom;
+window.editColumnOnDiagram = editColumnOnDiagram;
+window.addColumnOnDiagram = addColumnOnDiagram;
+window.editTableName = editTableName;
+window.startFK = startFK;
+window.completeFK = completeFK;
+window.addTableOnDiagram = addTableOnDiagram;
