@@ -98,7 +98,10 @@ function renderGraph(vp, tables, edges, modelDetails) {
 
   var elements = [];
   tables.forEach(function(t) {
-    elements.push({ data: { id: 't' + t.id, label: buildLabel(t, modelDetails[t.id]), tableId: t.id, tableName: t.table_name }, classes: 'table-node' });
+    var label = buildLabel(t, modelDetails[t.id]);
+    var lines = label.split('\n').length;
+    var h = lines * 18 + 24;
+    elements.push({ data: { id: 't' + t.id, label: label, tableId: t.id, tableName: t.table_name, nodeHeight: h }, classes: 'table-node' });
   });
   edges.forEach(function(e) {
     elements.push({ data: { id: 'e_' + e.source + '_' + e.target, source: 't' + e.source, target: 't' + e.target, label: e.source_col.substring(0, 10) + ' → ' + e.target_col.substring(0, 10) } });
@@ -108,9 +111,10 @@ function renderGraph(vp, tables, edges, modelDetails) {
     container: vp, elements: elements,
     style: [
       { selector: '.table-node', style: {
-        'shape': 'round-rectangle', 'width': 280, 'height': 'label',
+        'shape': 'round-rectangle', 'width': 280,
+        'height': function(ele) { return ele.data('nodeHeight') || 200; },
         'background-color': '#ffffff', 'border-color': '#cbd5e1', 'border-width': 2,
-        'padding': '12', 'text-valign': 'top', 'text-halign': 'left',
+        'padding': '10', 'text-valign': 'top', 'text-halign': 'left',
         'text-wrap': 'none', 'font-size': '11', 'font-family': 'monospace',
         'color': '#334155', 'text-max-width': '260', 'text-margin-y': 4
       }},
@@ -123,7 +127,7 @@ function renderGraph(vp, tables, edges, modelDetails) {
       }}
     ],
     layout: { name: 'dagre', rankDir: 'LR', spacingFactor: 1.3, nodeSep: 50, edgeSep: 25, rankSep: 100 },
-    wheelSensitivity: 0.3, minZoom: 0.05, maxZoom: 3
+    minZoom: 0.05, maxZoom: 3
   });
 
   cy.on('tap', 'node', function(ev) {
