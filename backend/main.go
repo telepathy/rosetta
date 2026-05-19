@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -15,6 +16,9 @@ import (
 )
 
 func main() {
+	seedDummy := flag.Bool("seed-dummy", false, "Seed 100 dummy tables for testing")
+	flag.Parse()
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
@@ -22,6 +26,15 @@ func main() {
 
 	if err := database.Init(&cfg.Database); err != nil {
 		log.Fatalf("Failed to init database: %v", err)
+	}
+
+	if *seedDummy {
+		log.Println("Seeding 100 dummy tables...")
+		if err := database.SeedDummyTables(database.DB); err != nil {
+			log.Fatalf("Failed to seed dummy data: %v", err)
+		}
+		log.Println("Dummy tables seeded successfully. Restart without --seed-dummy to run normally.")
+		return
 	}
 
 	authSvc := service.NewAuthService(database.DB, cfg.JWT)
