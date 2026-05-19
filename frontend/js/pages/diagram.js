@@ -22,22 +22,7 @@ async function pageDiagram() {
   return html;
 }
 
-function ensureCytoscape() {
-  if (window.cytoscape) return;
-  var s1 = document.createElement('script');
-  s1.src = 'https://cdn.jsdelivr.net/npm/cytoscape@3.30.4/dist/cytoscape.min.js';
-  s1.onload = function() {
-    var s2 = document.createElement('script');
-    s2.src = 'https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js';
-    s2.onload = function() {
-      var s3 = document.createElement('script');
-      s3.src = 'https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.js';
-      document.head.appendChild(s3);
-    };
-    document.head.appendChild(s2);
-  };
-  document.head.appendChild(s1);
-}
+function ensureCytoscape() {}
 
 function setMode(mode) {
   diagramState.mode = mode; diagramState.fkSource = null;
