@@ -24,6 +24,7 @@
 <script src="js/pages/instances.js"></script>
 <script src="js/pages/dicts.js"></script>
 <script src="js/pages/models.js"></script>
+<script src="js/pages/help.js"></script>
 <script>
 router.guard(async function() {
   var token = api.getToken();
@@ -41,6 +42,7 @@ router.on('/instances', pageInstances);
 router.on('/dicts', pageDicts);
 router.on('/models', pageModels);
 router.on('/models/:id', pageModelDetail);
+router.on('/help', pageHelp);
 
 router.start();
 </script>

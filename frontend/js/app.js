@@ -72,9 +72,10 @@ function sidebarHtml(currentPath) {
   var items = [
     ['/', '📊', '仪表盘'],
     ['/users', '👥', '用户管理'],
-    ['/instances', '🗄️', '实 例管理'],
+    ['/instances', '🗄️', '实例管理'],
     ['/dicts', '📖', '字典维护'],
     ['/models', '📐', '模型管理'],
+    ['/help', '📖', '使用帮助'],
   ];
   var html = '<div class="app-layout"><div class="sidebar">';
   html += '<div class="sidebar-header"><h2>Rosetta</h2><div class="version">数据治理平台</div></div>';
