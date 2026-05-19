@@ -127,7 +127,7 @@ function renderGraph(vp, tables, edges, modelDetails) {
         'text-background-padding': '2', 'text-background-shape': 'round-rectangle'
       }}
     ],
-    layout: { name: 'dagre', rankDir: 'LR', spacingFactor: 1.3, nodeSep: 50, edgeSep: 25, rankSep: 100 },
+    layout: { name: 'breadthfirst', directed: true, spacingFactor: 1.3, avoidOverlap: true, grid: true },
     minZoom: 0.05, maxZoom: 3
   });
 
