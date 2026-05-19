@@ -2,11 +2,7 @@
 
 ## 登录
 
-浏览器打开 `http://localhost:8080`，使用以下账号登录：
-
-| 用户名 | 密码 | 角色 |
-|--------|------|------|
-| admin | admin123 | 超级管理员 |
+浏览器打开 `http://localhost:8080`，使用系统管理员分配的账号登录。
 
 登录后进入仪表盘，显示各模块数据概览。
 
@@ -134,7 +130,7 @@ Schema 层级：ODS（贴源层）、DWD（明细层）、DWS（汇总层）、A
 # 获取 Token
 TOKEN=$(curl -s http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}' \
+  -d '{"username":"<用户名>","password":"<密码>"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['token'])")
 
 # 浏览表

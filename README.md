@@ -13,7 +13,6 @@ cd backend && go run .
 
 # 3. 打开浏览器
 # http://localhost:8080
-# 账号: admin / admin123
 ```
 
 ## 技术栈
@@ -33,7 +32,7 @@ database:
   host: 127.0.0.1
   port: 3306
   user: root
-  password: rosetta123
+  password: <your-password>
   dbname: rosetta
 
 jwt:

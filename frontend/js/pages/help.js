@@ -5,10 +5,7 @@ async function pageHelp() {
 
   html += '<div class="card" id="help-login">';
   html += '<h3 style="margin-bottom:12px">1. 登录</h3>';
-  html += '<table><thead><tr><th>用户名</th><th>密码</th><th>角色</th></tr></thead><tbody>';
-  html += '<tr><td>admin</td><td>admin123</td><td>超级管理员</td></tr>';
-  html += '</tbody></table>';
-  html += '<p style="margin-top:8px;color:var(--text-secondary);font-size:13px">登录后进入仪表盘，显示各模块数据概览。点击统计卡片可跳转到对应管理页。</p>';
+  html += '<p style="color:var(--text-secondary)">使用系统管理员分配的账号登录。登录后进入仪表盘，显示各模块数据概览。点击统计卡片可跳转到对应管理页。</p>';
   html += '</div>';
 
   html += '<div class="card" id="help-users">';
