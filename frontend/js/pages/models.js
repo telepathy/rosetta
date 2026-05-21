@@ -1,24 +1,63 @@
 var modelsPage = 1;
+var modelsDBID = 0;
+var modelsSchemaID = 0;
 
 async function pageModels() {
   document.title = 'Rosetta - 模型管理';
   var html = sidebarHtml('/models') + pageHeader('模型管理', '管理逻辑表模型，定义字段、索引、外键');
-  html += '<div class="page-toolbar"><button class="btn btn-primary" onclick="showModelCreateModal()">+ 新建模型</button><div class="flex-spacer"></div><div class="search-box"><input id="model-search" placeholder="搜索表名..." onkeydown="if(event.key===\'Enter\')loadModels()"></div></div>';
+  html += '<div class="page-toolbar"><button class="btn btn-primary" onclick="showModelCreateModal()">+ 新建模型</button><div class="flex-spacer"></div>';
+  html += '<select id="models-db-filter" onchange="onModelsDBChange()"><option value="0">全部逻辑库</option></select> ';
+  html += '<select id="models-schema-filter" onchange="onModelsSchemaChange()"><option value="0">全部 Schema</option></select> ';
+  html += '<div class="search-box"><input id="model-search" placeholder="搜索表名..." onkeydown="if(event.key===\'Enter\')loadModels()"></div></div>';
   html += '<div id="models-table">加载中...</div>';
   html += '<div id="models-pagination"></div>';
   html += '</div></div>';
-  setTimeout(loadModels, 0);
+  setTimeout(function() { loadModelFilters(); loadModels(); }, 0);
   return html;
 }
+
+async function loadModelFilters() {
+  try {
+    var dbs = (await api.get('/databases')).data || [];
+    var dbSel = document.getElementById('models-db-filter');
+    dbSel.innerHTML = '<option value="0">全部逻辑库</option>';
+    dbs.forEach(function(d) { dbSel.innerHTML += '<option value="' + d.id + '">' + escapeHtml(d.name) + '</option>'; });
+  } catch(e) {}
+}
+
+async function onModelsDBChange() {
+  modelsDBID = parseInt(document.getElementById('models-db-filter').value) || 0;
+  var schemaSel = document.getElementById('models-schema-filter');
+  schemaSel.innerHTML = '<option value="0">全部 Schema</option>';
+  if (modelsDBID > 0) {
+    try {
+      var schemas = (await api.get('/databases/' + modelsDBID + '/schemas')).data || [];
+      schemas.forEach(function(s) { schemaSel.innerHTML += '<option value="' + s.id + '">' + escapeHtml(s.name) + '</option>'; });
+    } catch(e) {}
+  }
+  modelsSchemaID = 0;
+  loadModels();
+}
+
+function onModelsSchemaChange() {
+  modelsSchemaID = parseInt(document.getElementById('models-schema-filter').value) || 0;
+  loadModels();
+}
+
+window.onModelsDBChange = onModelsDBChange;
+window.onModelsSchemaChange = onModelsSchemaChange;
 
 async function loadModels() {
   try {
     var q = document.getElementById('model-search') ? document.getElementById('model-search').value : '';
-    var data = await api.get('/models?page=' + modelsPage + '&page_size=15&keyword=' + encodeURIComponent(q));
+    var url = '/models?page=' + modelsPage + '&page_size=15&keyword=' + encodeURIComponent(q);
+    if (modelsDBID > 0) url += '&database_id=' + modelsDBID;
+    if (modelsSchemaID > 0) url += '&schema_id=' + modelsSchemaID;
+    var data = await api.get(url);
     var items = data.data.items;
-    var html = renderTable(['ID', '表名', '注释', '字段数', '状态'], items.map(function(m) {
+    var html = renderTable(['ID', '表名', '逻辑库', 'Schema', '注释', '字段数', '状态'], items.map(function(m) {
       return [m.id, '<a href="#/models/' + m.id + '" style="color:var(--primary);text-decoration:none;font-weight:500">' + m.table_name + '</a>',
-        m.table_comment || '-', m.column_count,
+        m.db_name || '-', m.schema_name || '-', m.table_comment || '-', m.column_count,
         m.table_status === 'DRAFT' ? '<span class="badge badge-warning">草稿</span>' : '<span class="badge badge-success">已发布</span>'];
     }), function(row) {
       var id = row[0];
@@ -34,7 +73,12 @@ async function loadModels() {
 }
 
 async function showModelCreateModal() {
+  var dbs = [];
+  try { dbs = (await api.get('/databases')).data || []; } catch(e) {}
+  var dbOpts = dbs.map(function(d) { return '<option value="' + d.id + '">' + escapeHtml(d.name) + '</option>'; }).join('');
   openModal('新建模型',
+    '<div class="form-row"><div class="form-group"><label>逻辑库</label><select id="mm-database" onchange="onCreateDBChange()"><option value="">请选择</option>' + dbOpts + '</select></div>' +
+    '<div class="form-group"><label>Schema</label><select id="mm-schema"><option value="">先选择逻辑库</option></select></div></div>' +
     '<div class="form-group"><label>表名</label><input id="mm-tablename" placeholder="如 user_order (snake_case)"></div>' +
     '<div class="form-group"><label>注释</label><input id="mm-comment" placeholder="表注释"></div>',
     '<button class="btn btn-outline" onclick="closeModal()">取消</button>' +
@@ -43,11 +87,26 @@ async function showModelCreateModal() {
 }
 window.showModelCreateModal = showModelCreateModal;
 
+window.onCreateDBChange = async function() {
+  var dbId = document.getElementById('mm-database').value;
+  var schemaSel = document.getElementById('mm-schema');
+  schemaSel.innerHTML = '<option value="">请选择</option>';
+  if (!dbId) return;
+  try {
+    var schemas = (await api.get('/databases/' + dbId + '/schemas')).data || [];
+    schemas.forEach(function(s) { schemaSel.innerHTML += '<option value="' + s.id + '">' + escapeHtml(s.name) + '</option>'; });
+  } catch(e) {}
+};
+
 async function saveNewModel() {
   var name = document.getElementById('mm-tablename').value;
+  var dbId = parseInt(document.getElementById('mm-database').value) || 0;
+  var schemaId = parseInt(document.getElementById('mm-schema').value) || 0;
   if (!name) { toast('请输入表名', 'error'); return; }
+  if (!dbId) { toast('请选择逻辑库', 'error'); return; }
+  if (!schemaId) { toast('请选择 Schema', 'error'); return; }
   try {
-    await api.post('/models', { table_name: name, table_comment: document.getElementById('mm-comment').value });
+    await api.post('/models', { table_name: name, table_comment: document.getElementById('mm-comment').value, database_id: dbId, schema_id: schemaId });
     closeModal();
     toast('创建成功', 'success');
     loadModels();
@@ -68,9 +127,9 @@ async function showModelDDL(modelId) {
     var gaussRes = await api.get('/models/' + modelId + '/ddl?dialect=GAUSSDB');
     window._ddlData = { mysql: mysqlRes.data.ddl, gaussdb: gaussRes.data.ddl };
     openModal('DDL 预览',
-      '<div class="tabs"><button class="tab active" onclick="switchDDLTab(\'mysql\')">MySQL</button><button class="tab" onclick="switchDDLTab(\'gaussdb\')">GaussDB M</button></div>' +
-      '<div class="json-view" id="ddl-mysql">' + escapeHtml(window._ddlData.mysql) + '</div>' +
-      '<div class="json-view hidden" id="ddl-gaussdb">' + escapeHtml(window._ddlData.gaussdb) + '</div>',
+      '<div class="tabs"><button class="tab active" onclick="switchDDLTab(event,\'mysql\')">MySQL</button><button class="tab" onclick="switchDDLTab(event,\'gaussdb\')">GaussDB M</button></div>' +
+      '<div class="json-view" data-dialect="mysql">' + escapeHtml(window._ddlData.mysql) + '</div>' +
+      '<div class="json-view hidden" data-dialect="gaussdb">' + escapeHtml(window._ddlData.gaussdb) + '</div>',
       '<button class="btn btn-outline" onclick="copyDDL()">复制</button>' +
       '<button class="btn btn-outline" onclick="closeModal()">关闭</button>', true
     );
@@ -78,17 +137,20 @@ async function showModelDDL(modelId) {
 }
 window.showModelDDL = showModelDDL;
 
-function switchDDLTab(dialect) {
-  var tabs = document.querySelectorAll('#modal-content .tab');
-  tabs.forEach(function(t) { t.classList.remove('active'); });
-  if (dialect === 'mysql') { tabs[0].classList.add('active'); } else { tabs[1].classList.add('active'); }
-  document.getElementById('ddl-mysql').classList.toggle('hidden', dialect !== 'mysql');
-  document.getElementById('ddl-gaussdb').classList.toggle('hidden', dialect !== 'gaussdb');
+function switchDDLTab(e, dialect) {
+  e.target.closest('.tabs').querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+  e.target.classList.add('active');
+  var section = e.target.closest('.tabs').parentElement;
+  section.querySelectorAll('.json-view').forEach(function(el) { el.classList.add('hidden'); });
+  var target = section.querySelector('.json-view[data-dialect="' + dialect + '"]');
+  if (target) target.classList.remove('hidden');
 }
 window.switchDDLTab = switchDDLTab;
 
 function copyDDL() {
-  var ddl = document.querySelector('#ddl-mysql.hidden') ? window._ddlData.gaussdb : window._ddlData.mysql;
+  var mysqlTab = document.querySelector('.tabs .tab.active');
+  var dialect = mysqlTab && mysqlTab.textContent.trim() === 'GaussDB M' ? 'gaussdb' : 'mysql';
+  var ddl = window._ddlData[dialect];
   if (ddl) { navigator.clipboard.writeText(ddl).then(function() { toast('已复制', 'success'); }); }
 }
 window.copyDDL = copyDDL;
@@ -102,7 +164,7 @@ async function pageModelDetail(params) {
 
   document.title = 'Rosetta - ' + detail.table_name;
   var html = sidebarHtml('/models') + pageHeader('📐 ' + detail.table_name, (detail.table_comment || '无注释') + ' | ' + detail.table_status);
-  html += '<div class="page-toolbar"><button class="btn btn-outline" onclick="router.navigate(\'/models\')">← 返回</button><div class="flex-spacer"></div><button class="btn btn-primary" onclick="showAddColumnModal(' + modelId + ')">+ 添加字段</button> <button class="btn btn-outline" onclick="showDeployModal(' + modelId + ')">🚀 部署</button></div>';
+  html += '<div class="page-toolbar"><button class="btn btn-outline" onclick="history.back()">← 返回</button><div class="flex-spacer"></div><button class="btn btn-primary" onclick="showAddColumnModal(' + modelId + ')">+ 添加字段</button> <button class="btn btn-outline" onclick="showDeployModal(' + modelId + ')">🚀 部署</button></div>';
   html += '<div class="tabs"><button class="tab active" onclick="switchModelTab(event,\'columns\')">字段 (' + detail.columns.length + ')</button><button class="tab" onclick="switchModelTab(event,\'indexes\')">索引 (' + detail.indexes.length + ')</button><button class="tab" onclick="switchModelTab(event,\'fks\')">外键 (' + detail.foreign_keys.length + ')</button><button class="tab" onclick="switchModelTab(event,\'ddl\')">DDL 预览</button></div>';
 
   html += renderColumnsTab(detail.columns, modelId);
@@ -112,9 +174,9 @@ async function pageModelDetail(params) {
   try {
     var mysqlRes = await api.get('/models/' + modelId + '/ddl?dialect=MYSQL');
     var gaussRes = await api.get('/models/' + modelId + '/ddl?dialect=GAUSSDB');
-    html += '<div id="tab-ddl" class="hidden"><div class="tabs"><button class="tab active" onclick="switchDDLTab2(event,\'mysql2\')">MySQL</button><button class="tab" onclick="switchDDLTab2(event,\'gaussdb2\')">GaussDB M</button></div>';
-    html += '<div class="json-view" id="ddl2-mysql">' + escapeHtml(mysqlRes.data.ddl) + '</div>';
-    html += '<div class="json-view hidden" id="ddl2-gaussdb">' + escapeHtml(gaussRes.data.ddl) + '</div></div>';
+    html += '<div id="tab-ddl" class="hidden"><div class="tabs"><button class="tab active" onclick="switchDDLTab(event,\'mysql\')">MySQL</button><button class="tab" onclick="switchDDLTab(event,\'gaussdb\')">GaussDB M</button></div>';
+    html += '<div class="json-view" data-dialect="mysql">' + escapeHtml(mysqlRes.data.ddl) + '</div>';
+    html += '<div class="json-view hidden" data-dialect="gaussdb">' + escapeHtml(gaussRes.data.ddl) + '</div></div>';
   } catch (e) {
     html += '<div id="tab-ddl" class="hidden"><div class="empty-state"><p>DDL 加载失败</p></div></div>';
   }
@@ -134,14 +196,6 @@ function switchModelTab(e, tab) {
 }
 window.switchModelTab = switchModelTab;
 
-function switchDDLTab2(e, dialect) {
-  var tabs = document.querySelectorAll('#tab-ddl .tab');
-  tabs.forEach(function(t) { t.classList.remove('active'); });
-  e.target.classList.add('active');
-  document.getElementById('ddl2-mysql').classList.toggle('hidden', dialect !== 'mysql2');
-  document.getElementById('ddl2-gaussdb').classList.toggle('hidden', dialect !== 'gaussdb2');
-}
-window.switchDDLTab2 = switchDDLTab2;
 
 function renderColumnsTab(columns, modelId) {
   var h = '<div id="tab-columns"><table class="inline-edit-table"><thead><tr><th>#</th><th>字段名</th><th>类型</th><th>非空</th><th>主键</th><th>注释</th><th>操作</th></tr></thead><tbody>';

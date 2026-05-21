@@ -49,6 +49,9 @@ func main() {
 	dictSvc := service.NewDictService(database.DB)
 	dictHandler := handler.NewDictHandler(dictSvc)
 
+	dbSvc := service.NewDatabaseService(database.DB)
+	dbHandler := handler.NewDatabaseHandler(dbSvc)
+
 	modelSvc := service.NewModelService(database.DB)
 	modelHandler := handler.NewModelHandler(modelSvc)
 
@@ -75,6 +78,7 @@ func main() {
 		handler.RegisterUserRoutes(api, userHandler, cfg.JWT.Secret)
 		handler.RegisterInstanceRoutes(api, instHandler, cfg.JWT.Secret)
 		handler.RegisterDictRoutes(api, dictHandler, cfg.JWT.Secret)
+		handler.RegisterDatabaseRoutes(api, dbHandler, cfg.JWT.Secret)
 		handler.RegisterModelRoutes(api, modelHandler, cfg.JWT.Secret)
 		handler.RegisterReverseEngRoutes(api, revEngHandler, cfg.JWT.Secret)
 		handler.RegisterVizRoutes(api, vizHandler, cfg.JWT.Secret)

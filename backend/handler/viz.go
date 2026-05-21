@@ -87,6 +87,7 @@ func (h *VizHandler) ERDiagram(c *gin.Context) {
 		SourceCol    string `json:"source_col"`
 		TargetCol    string `json:"target_col"`
 		FkName       string `json:"fk_name"`
+		Virtual      bool   `json:"virtual"`
 	}
 
 	type erResponse struct {
@@ -100,7 +101,7 @@ func (h *VizHandler) ERDiagram(c *gin.Context) {
 	}
 
 	rows, err := database.DB.Raw(
-		"SELECT lm.id, lm.table_name, lm.table_comment, COUNT(mc.id) as col_count FROM logical_model lm LEFT JOIN model_column mc ON mc.model_id = lm.id INNER JOIN model_deployment md ON md.model_id = lm.id WHERE md.schema_id = ? GROUP BY lm.id, lm.table_name, lm.table_comment",
+		"SELECT lm.id, lm.table_name, lm.table_comment, COUNT(mc.id) as col_count FROM logical_model lm LEFT JOIN model_column mc ON mc.model_id = lm.id WHERE lm.schema_id = ? GROUP BY lm.id, lm.table_name, lm.table_comment",
 		schemaID,
 	).Rows()
 	if err != nil {
@@ -144,13 +145,60 @@ func (h *VizHandler) ERDiagram(c *gin.Context) {
 		}
 	}
 
+	// Also fetch virtual FK edges
+	if len(tableIDs) > 0 {
+		var vfks []struct {
+			ModelID       uint64
+			ColumnName    string
+			RefModelID    uint64
+			RefColumnName string
+			FkName        string
+		}
+		ids := make([]uint64, 0, len(tableIDs))
+		for tid := range tableIDs {
+			ids = append(ids, tid)
+		}
+		database.DB.Raw(
+			"SELECT model_id, column_name, ref_model_id, ref_column_name, fk_name FROM virtual_foreign_key WHERE model_id IN ?", ids,
+		).Scan(&vfks)
+
+		for _, vfk := range vfks {
+			if tableIDs[vfk.RefModelID] {
+				result.Edges = append(result.Edges, erEdge{
+					Source:    vfk.ModelID,
+					Target:    vfk.RefModelID,
+					SourceCol: vfk.ColumnName,
+					TargetCol: vfk.RefColumnName,
+					FkName:    vfk.FkName,
+					Virtual:   true,
+				})
+			}
+		}
+	}
+
 	utils.Success(c, result)
+}
+
+func (h *VizHandler) ListVirtualForeignKeys(c *gin.Context) {
+	schemaID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		utils.BadRequest(c, "无效的Schema ID")
+		return
+	}
+
+	vfks, err := h.modelSvc.ListVirtualForeignKeys(schemaID)
+	if err != nil {
+		utils.InternalError(c, "查询虚拟外键列表失败")
+		return
+	}
+	utils.Success(c, vfks)
 }
 
 func RegisterVizRoutes(r *gin.RouterGroup, h *VizHandler, authSecret string) {
 	r.Use(middleware.AuthRequired(authSecret))
 	{
 		r.GET("/models/:id/structure-diagram", h.StructureDiagram)
-		r.GET("/schemas/:id/er-diagram", h.ERDiagram)
+		r.GET("/logical-schemas/:id/er-diagram", h.ERDiagram)
+		r.GET("/logical-schemas/:id/virtual-foreign-keys", h.ListVirtualForeignKeys)
 	}
 }

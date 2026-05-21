@@ -1,72 +1,74 @@
-var diagramState = { mode: 'view', schemaId: null, fkSource: null, cy: null };
+var diagramState = { cy: null, connectMode: false, connectSource: null };
 
 async function pageDiagram() {
   document.title = 'Rosetta - ER 图';
   var html = sidebarHtml('/diagram');
-  html += '<div class="page-header"><h2>📊 数据库模型图</h2><div class="page-desc">自动布局 ｜ 滚轮缩放 ｜ 拖拽平移 ｜ 点击表节点进入详情</div></div>';
+  html += '<div class="page-header"><h2>📊 数据库模型图</h2><div class="page-desc">自动布局 ｜ 滚轮缩放 ｜ 拖拽平移 ｜ 点击表节点查看详情</div></div>';
   html += '<div class="page-toolbar">';
-  html += '<select id="diagram-schema" onchange="loadDiagram()"><option value="">选择 Schema...</option></select>';
+  html += '<select id="diagram-database" onchange="onDiagramDBChange()"><option value="">选择逻辑库...</option></select>';
+  html += '<select id="diagram-schema" onchange="loadDiagram()"><option value="">先选择逻辑库</option></select>';
   html += '<div class="flex-spacer"></div>';
-  html += '<button id="btn-mode-view" class="btn btn-sm btn-primary" onclick="setMode(\'view\')">👁 浏览</button>';
-  html += '<button id="btn-mode-edit" class="btn btn-sm btn-outline" onclick="setMode(\'edit\')">✏️ 编辑</button>';
-  html += '<button id="btn-mode-fk" class="btn btn-sm btn-outline" onclick="setMode(\'fk\')">🔗 建外键</button>';
-  html += '<button id="btn-add-table" class="btn btn-sm btn-primary hidden" onclick="addTableOnDiagram()">+ 新表</button>';
+  html += '<button id="vfk-mode-btn" class="btn btn-sm btn-outline" onclick="toggleConnectMode()">🔗 虚拟外键</button>';
   html += '<button class="btn btn-sm btn-outline" onclick="fitDiagram()">⊞ 适应</button>';
   html += '<button class="btn btn-sm btn-outline" onclick="if(diagramState.cy){diagramState.cy.zoom(1);diagramState.cy.center();}">1:1</button>';
   html += '</div>';
-  html += '<div id="diagram-viewport" style="width:100%;height:calc(100vh - 200px);border:1px solid var(--border);border-radius:var(--radius);background:#fafbfc;position:relative">';
-  html += '<div class="empty-state"><div class="empty-icon">📊</div><p>请先选择一个 Schema 查看 ER 图</p></div>';
+  html += '<div id="vfk-status" style="display:none;padding:4px 12px;background:#eef2ff;border-radius:var(--radius);font-size:13px;color:var(--primary);margin-bottom:8px"></div>';
+  html += '<div style="display:flex;gap:16px;height:calc(100vh - 240px)">';
+  html += '<div id="diagram-viewport" style="flex:1;border:1px solid var(--border);border-radius:var(--radius);background:#fafbfc;position:relative;min-width:0">';
+  html += '<div class="empty-state"><div class="empty-icon">📊</div><p>请先选择逻辑库和 Schema 查看 ER 图</p></div>';
+  html += '</div>';
+  html += '<div id="diagram-detail" class="card" style="width:340px;flex-shrink:0;overflow-y:auto;display:none">';
+  html += '<div class="card-title" id="detail-title">表详情</div>';
+  html += '<div id="detail-content"></div>';
   html += '</div>';
   html += '</div></div>';
-  setTimeout(function() { loadSchemaOptions(); }, 0);
+  setTimeout(function() { loadDiagramDBOptions(); }, 0);
   return html;
 }
 
-function setMode(mode) {
-  diagramState.mode = mode; diagramState.fkSource = null;
-  ['view','edit','fk'].forEach(function(m) {
-    var btn = document.getElementById('btn-mode-' + m);
-    if (btn) btn.className = 'btn btn-sm ' + (m === mode ? 'btn-primary' : 'btn-outline');
-  });
-  document.getElementById('btn-add-table').classList.toggle('hidden', mode === 'view');
-  if (diagramState.schemaId) loadDiagram();
+async function loadDiagramDBOptions() {
+  try {
+    var dbs = (await api.get('/databases')).data || [];
+    var sel = document.getElementById('diagram-database');
+    sel.innerHTML = '<option value="">选择逻辑库...</option>';
+    dbs.forEach(function(d) { sel.innerHTML += '<option value="' + d.id + '">' + escapeHtml(d.name) + '</option>'; });
+    if (dbs.length === 1) { sel.value = dbs[0].id; onDiagramDBChange(); }
+  } catch(e) {}
 }
 
-async function loadSchemaOptions() {
+async function onDiagramDBChange() {
+  var dbId = document.getElementById('diagram-database').value;
+  var schemaSel = document.getElementById('diagram-schema');
+  schemaSel.innerHTML = '<option value="">先选择逻辑库</option>';
+  if (!dbId) { schemaSel.innerHTML = '<option value="">选择 Schema...</option>'; return; }
   try {
-    var schemas = [];
-    var instances = (await api.get('/instances?page=1&page_size=50')).data.items || [];
-    for (var i = 0; i < instances.length; i++) {
-      try {
-        var s = (await api.get('/instances/' + instances[i].id + '/schemas')).data;
-        if (Array.isArray(s)) s.forEach(function(sc) { schemas.push({ id: sc.id, name: instances[i].name + ' / ' + sc.schema_name }); });
-      } catch(e) {}
-    }
-    var sel = document.getElementById('diagram-schema');
-    sel.innerHTML = '<option value="">选择 Schema...</option>';
-    schemas.forEach(function(s) { sel.innerHTML += '<option value="' + s.id + '">' + s.name + '</option>'; });
-    if (schemas.length === 1) { sel.value = schemas[0].id; loadDiagram(); }
+    var schemas = (await api.get('/databases/' + dbId + '/schemas')).data || [];
+    schemaSel.innerHTML = '<option value="">选择 Schema...</option>';
+    schemas.forEach(function(s) { schemaSel.innerHTML += '<option value="' + s.id + '">' + escapeHtml(s.name) + '</option>'; });
   } catch(e) {}
 }
 
 async function loadDiagram() {
   var schemaId = document.getElementById('diagram-schema').value;
   if (!schemaId) return;
-  diagramState.schemaId = schemaId;
   if (diagramState.cy) { diagramState.cy.destroy(); diagramState.cy = null; }
+  document.getElementById('diagram-detail').style.display = 'none';
+  diagramState.connectMode = false;
+  diagramState.connectSource = null;
+  updateConnectModeUI();
 
   var vp = document.getElementById('diagram-viewport');
   vp.innerHTML = '<div style="text-align:center;padding:60px">加载中...</div>';
 
   try {
-    var er = (await api.get('/schemas/' + schemaId + '/er-diagram')).data;
+    var er = (await api.get('/logical-schemas/' + schemaId + '/er-diagram')).data;
     if (!er || !er.tables || er.tables.length === 0) {
       vp.innerHTML = '<div class="empty-state"><p>该 Schema 下没有部署的模型</p></div>'; return;
     }
-    var tables = er.tables, edges = er.edges || [], modelDetails = {};
-    var batchSize = 8;
-    for (var i = 0; i < tables.length; i += batchSize) {
-      var batch = tables.slice(i, i + batchSize);
+    var tables = er.tables, edges = er.edges || [];
+    var modelDetails = {};
+    for (var i = 0; i < tables.length; i += 8) {
+      var batch = tables.slice(i, i + 8);
       var results = await Promise.all(batch.map(function(t) { return api.get('/models/' + t.id).catch(function() { return null; }); }));
       results.forEach(function(r, j) { if (r && r.data) modelDetails[batch[j].id] = r.data; });
     }
@@ -77,20 +79,46 @@ async function loadDiagram() {
   }
 }
 
-function buildLabel(t, detail) {
-  var cols = detail ? (detail.columns || []) : [];
-  var lines = [t.table_name];
-  lines.push('─'.repeat(Math.max(22, t.table_name.length + 6)));
-  for (var i = 0; i < Math.min(cols.length, 15); i++) {
-    var c = cols[i], pfx = c.is_primary_key ? '🔑' : '  ';
-    var ts = c.logical_type + (c.type_length ? '(' + c.type_length + (c.type_scale ? ',' + c.type_scale : '') + ')' : '');
-    var line = pfx + ' ' + c.column_name;
-    while (line.length < 24) line += ' ';
-    line += ' ' + ts;
-    lines.push(line);
+function renderDetail(modelId, modelDetails) {
+  var detail = modelDetails[modelId];
+  if (!detail) return;
+  var title = document.getElementById('detail-title');
+  title.textContent = detail.table_name || '表详情';
+  var cols = detail.columns || [];
+  var html = '<table style="font-size:12px"><thead><tr><th>字段</th><th>类型</th><th>键</th><th>可空</th></tr></thead><tbody>';
+  cols.forEach(function(c) {
+    var ts = c.logical_type;
+    if (c.type_length) ts += '(' + c.type_length + (c.type_scale ? ',' + c.type_scale : '') + ')';
+    var key = c.is_primary_key ? '🔑' : (c.is_foreign_key ? '🔗' : '');
+    html += '<tr><td style="font-family:monospace;white-space:nowrap">' + c.column_name + '</td><td style="font-family:monospace;font-size:11px;color:var(--text-secondary)">' + ts + '</td><td>' + key + '</td><td>' + (c.nullable ? '✓' : '✗') + '</td></tr>';
+  });
+  html += '</tbody></table>';
+  if (detail.table_comment) html += '<div style="margin-top:8px;font-size:12px;color:var(--text-secondary)">备注: ' + detail.table_comment + '</div>';
+
+  // Virtual FK section
+  var vfks = detail.virtual_foreign_keys || [];
+  if (vfks.length > 0) {
+    html += '<div style="margin-top:12px;font-weight:600;font-size:13px;color:#6366f1">🔗 虚拟外键</div>';
+    html += '<table style="font-size:12px;margin-top:4px"><thead><tr><th>字段</th><th>引用表</th><th>引用列</th><th></th></tr></thead><tbody>';
+    vfks.forEach(function(vfk) {
+      html += '<tr><td>' + escapeHtml(vfk.column_name) + '</td><td>' + escapeHtml(vfk.ref_table_name || '') + '</td><td>' + escapeHtml(vfk.ref_column_name) + '</td>';
+      html += '<td><button class="btn btn-sm" style="color:#ef4444;font-size:11px;padding:2px 6px" onclick="deleteVFKFromDetail(' + detail.id + ',' + vfk.id + ')">✕</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
   }
-  if (cols.length > 15) lines.push('  ... +' + (cols.length - 15) + ' more');
-  return lines.join('\n');
+
+  document.getElementById('detail-content').innerHTML = html;
+  document.getElementById('diagram-detail').style.display = 'block';
+}
+
+async function deleteVFKFromDetail(modelId, vfkId) {
+  if (!confirm('确定删除该虚拟外键吗？')) return;
+  try {
+    await api.del('/models/' + modelId + '/virtual-foreign-keys/' + vfkId);
+    toast('虚拟外键已删除', 'success');
+    loadDiagram();
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 function renderGraph(vp, tables, edges, modelDetails) {
@@ -98,94 +126,235 @@ function renderGraph(vp, tables, edges, modelDetails) {
 
   var elements = [];
   tables.forEach(function(t) {
-    var label = buildLabel(t, modelDetails[t.id]);
-    var lines = label.split('\n').length;
-    var h = lines * 18 + 24;
-    elements.push({ data: { id: 't' + t.id, label: label, tableId: t.id, tableName: t.table_name, nodeHeight: h }, classes: 'table-node' });
+    elements.push({ data: { id: 't' + t.id, tableName: t.table_name, modelId: t.id } });
   });
+  var edgeIdx = 0;
   edges.forEach(function(e) {
-    if (e.source === e.target) return;
-    elements.push({ data: { id: 'e_' + e.source + '_' + e.target, source: 't' + e.source, target: 't' + e.target, label: e.source_col.substring(0, 10) + ' → ' + e.target_col.substring(0, 10) } });
+    if (e.source !== e.target) {
+      elements.push({
+        data: {
+          id: 'e_' + e.source + '_' + e.target + '_' + edgeIdx,
+          source: 't' + e.source,
+          target: 't' + e.target,
+          label: e.source_col + ' → ' + e.target_col,
+          virtual: e.virtual,
+          sourceCol: e.source_col,
+          targetCol: e.target_col,
+          fkName: e.fk_name
+        }
+      });
+      edgeIdx++;
+    }
   });
 
   var cy = window.cytoscape({
     container: vp, elements: elements,
     style: [
-      { selector: '.table-node', style: {
-        'shape': 'round-rectangle', 'width': 280,
-        'height': function(ele) { return ele.data('nodeHeight') || 200; },
-        'background-color': '#ffffff', 'border-color': '#cbd5e1', 'border-width': 2,
-        'padding': '10', 'text-valign': 'top', 'text-halign': 'left',
-        'text-wrap': 'none', 'font-size': '11', 'font-family': 'monospace',
-        'color': '#334155', 'text-max-width': '260', 'text-margin-y': 4
+      { selector: 'node', style: {
+        'label': 'data(tableName)',
+        'shape': 'round-rectangle', 'width': 140, 'height': 40,
+        'background-color': '#ffffff', 'border-color': '#4f46e5', 'border-width': 2,
+        'text-valign': 'center', 'text-halign': 'center',
+        'font-size': '12px', 'font-weight': 'bold', 'color': '#1e293b',
       }},
       { selector: 'edge', style: {
         'width': 1.5, 'line-color': '#94a3b8', 'target-arrow-color': '#94a3b8',
         'target-arrow-shape': 'triangle', 'curve-style': 'bezier',
-        'text-rotation': 'autorotate', 'font-size': '9', 'color': '#64748b',
-        'text-background-color': '#ffffff', 'text-background-opacity': 0.9,
-        'text-background-padding': '2', 'text-background-shape': 'round-rectangle'
-      }}
+        'label': 'data(label)',
+        'font-size': '10px', 'color': '#64748b',
+        'text-background-color': '#ffffff', 'text-background-opacity': 0.85,
+        'text-background-padding': '2px',
+        'text-rotation': 'autorotate',
+      }},
+      { selector: 'edge[?virtual]', style: {
+        'line-style': 'dashed', 'line-color': '#f59e0b', 'target-arrow-color': '#f59e0b',
+        'target-arrow-shape': 'triangle-backcurve', 'width': 2,
+        'line-dash-pattern': [6, 4],
+        'label': 'data(label)',
+        'font-size': '10px', 'color': '#d97706', 'font-weight': 'bold',
+        'text-background-color': '#fffbeb', 'text-background-opacity': 0.9,
+        'text-background-padding': '2px',
+        'text-rotation': 'autorotate',
+      }},
+      { selector: 'node.connect-source', style: {
+        'border-color': '#22c55e', 'border-width': 4,
+      }},
     ],
-    layout: { name: 'breadthfirst', directed: true, spacingFactor: 1.3, avoidOverlap: true, grid: true },
-    minZoom: 0.05, maxZoom: 3
+    layout: { name: 'cose', idealEdgeLength: 120, nodeRepulsion: 150000, gravity: 0.8, gravityRange: 500, nodeOverlap: 200, nodeDimensionsIncludeLabels: true, padding: 60, numIter: 2000 },
+    minZoom: 0.1, maxZoom: 3,
+  });
+
+  // Spread overlapping nodes after layout
+  cy.on('layoutstop', function() {
+    function getBB(n) { return n.boundingBox({ includeLabels: true }); }
+    function rectsOverlap(a, b) {
+      return !(a.x2 <= b.x1 || a.x1 >= b.x2 || a.y2 <= b.y1 || a.y1 >= b.y2);
+    }
+    var done = false;
+    while (!done) {
+      done = true;
+      var nodes = cy.nodes().toArray();
+      for (var i = 0; i < nodes.length; i++) {
+        for (var j = i + 1; j < nodes.length; j++) {
+          var a = getBB(nodes[i]), b = getBB(nodes[j]);
+          if (rectsOverlap(a, b)) {
+            done = false;
+            var dx = nodes[j].position('x') - nodes[i].position('x');
+            var dy = nodes[j].position('y') - nodes[i].position('y');
+            var overlapX = Math.min(a.x2 - b.x1, b.x2 - a.x1) / 2 + 5;
+            var overlapY = Math.min(a.y2 - b.y1, b.y2 - a.y1) / 2 + 5;
+            if (Math.abs(overlapX) > Math.abs(overlapY)) {
+              if (dx > 0) { nodes[i].position('x', nodes[i].position('x') - overlapX); nodes[j].position('x', nodes[j].position('x') + overlapX); }
+              else { nodes[i].position('x', nodes[i].position('x') + overlapX); nodes[j].position('x', nodes[j].position('x') - overlapX); }
+            } else {
+              if (dy > 0) { nodes[i].position('y', nodes[i].position('y') - overlapY); nodes[j].position('y', nodes[j].position('y') + overlapY); }
+              else { nodes[i].position('y', nodes[i].position('y') + overlapY); nodes[j].position('y', nodes[j].position('y') - overlapY); }
+            }
+          }
+        }
+      }
+    }
+    cy.fit(undefined, 50);
+  });
+
+  cy.on('tap', 'edge', function(ev) {
+    var edge = ev.target;
+    if (edge.data('virtual')) {
+      var srcName = edge.source().data('tableName');
+      var tgtName = edge.target().data('tableName');
+      var info = '虚拟外键: ' + srcName + '.' + edge.data('sourceCol') + ' → ' + tgtName + '.' + edge.data('targetCol');
+      if (edge.data('fkName')) info += '\n名称: ' + edge.data('fkName');
+      if (confirm(info + '\n\n删除该虚拟外键？')) {
+        var srcModelId = edge.source().data('modelId');
+        api.get('/logical-schemas/' + document.getElementById('diagram-schema').value + '/virtual-foreign-keys').then(function(res) {
+          var vfks = res.data || [];
+          var vfk = vfks.find(function(v) { return v.model_id === srcModelId && v.column_name === edge.data('sourceCol') && v.ref_column_name === edge.data('targetCol'); });
+          if (vfk) {
+            api.del('/models/' + srcModelId + '/virtual-foreign-keys/' + vfk.id).then(function() {
+              toast('虚拟外键已删除', 'success');
+              loadDiagram();
+            }).catch(function(e) { toast(e.message, 'error'); });
+          }
+        });
+      }
+    }
   });
 
   cy.on('tap', 'node', function(ev) {
-    var node = ev.target;
-    if (diagramState.mode === 'fk') {
-      if (!diagramState.fkSource) {
-        diagramState.fkSource = { modelId: node.data('tableId'), nodeId: node.id(), name: node.data('tableName') };
-        toast('已选择 ' + diagramState.fkSource.name + '，请点击目标表', 'info');
-        node.style('border-color', '#f59e0b'); node.style('border-width', 3);
-      } else if (node.data('tableId') !== diagramState.fkSource.modelId) {
-        completeFK(node.data('tableId'));
+    var n = ev.target;
+    if (diagramState.connectMode) {
+      ev.originalEvent && ev.originalEvent.stopPropagation();
+      if (!diagramState.connectSource) {
+        diagramState.connectSource = n;
+        n.addClass('connect-source');
+        document.getElementById('vfk-status').textContent = '已选择源表: ' + n.data('tableName') + '，请点击目标表';
+      } else {
+        var src = diagramState.connectSource;
+        var tgt = n;
+        n.removeClass('connect-source');
+        src.removeClass('connect-source');
+        diagramState.connectSource = null;
+        showVFKModal(src.data('modelId'), src.data('tableName'), tgt.data('modelId'), tgt.data('tableName'), modelDetails);
       }
-    } else if (diagramState.mode === 'view') {
-      router.navigate('/models/' + node.data('tableId'));
+      return;
+    }
+    renderDetail(n.data('modelId'), modelDetails);
+    n.style('border-width', 3);
+    cy.nodes().not(n).style('border-width', 2);
+  });
+
+  cy.on('tap', function(ev) {
+    if (ev.target === cy) {
+      if (diagramState.connectMode && diagramState.connectSource) {
+        diagramState.connectSource.removeClass('connect-source');
+        diagramState.connectSource = null;
+        document.getElementById('vfk-status').textContent = '连线模式：点击源表，再点击目标表';
+      }
+      document.getElementById('diagram-detail').style.display = 'none';
+      cy.nodes().style('border-width', 2);
     }
   });
 
   diagramState.cy = cy;
-  setTimeout(function() { if (cy) cy.fit(undefined, 50); }, 500);
+  diagramState.modelDetails = modelDetails;
+  cy.on('layoutstop', function() { cy.fit(undefined, 50); });
 }
 
-function completeFK(targetId) {
-  var src = diagramState.fkSource; diagramState.fkSource = null;
-  if (diagramState.cy) { diagramState.cy.nodes().style('border-color', '#cbd5e1'); diagramState.cy.nodes().style('border-width', 2); }
-  var input = prompt('外键关系: 源列名,目标列名\n示例: user_id,id');
-  if (!input) return;
-  var parts = input.split(',').map(function(s) { return s.trim(); });
-  if (parts.length < 2) { toast('请输入源列名和目标列名', 'error'); return; }
-  api.post('/models/' + src.modelId + '/foreign-keys', { fk_name: 'fk_' + parts[0], column_name: parts[0], ref_model_id: targetId, ref_column_name: parts[1] }).then(function() { toast('外键已创建', 'success'); loadDiagram(); }).catch(function(e) { toast(e.message, 'error'); });
+function toggleConnectMode() {
+  diagramState.connectMode = !diagramState.connectMode;
+  if (!diagramState.connectMode) {
+    diagramState.connectSource = null;
+  }
+  updateConnectModeUI();
+}
+
+function updateConnectModeUI() {
+  var btn = document.getElementById('vfk-mode-btn');
+  var status = document.getElementById('vfk-status');
+  if (!btn || !status) return;
+  if (diagramState.connectMode) {
+    btn.className = 'btn btn-sm btn-primary';
+    status.style.display = 'block';
+    status.textContent = '连线模式：点击源表，再点击目标表';
+  } else {
+    btn.className = 'btn btn-sm btn-outline';
+    status.style.display = 'none';
+    if (diagramState.cy) {
+      diagramState.cy.nodes().removeClass('connect-source');
+    }
+  }
+}
+
+function showVFKModal(srcModelId, srcTableName, tgtModelId, tgtTableName, modelDetails) {
+  var srcCols = (modelDetails[srcModelId] || {}).columns || [];
+  var tgtCols = (modelDetails[tgtModelId] || {}).columns || [];
+  var html = '<div style="padding:8px 0">';
+  html += '<div style="display:flex;gap:24px">';
+  html += '<div style="flex:1"><label style="font-weight:600;font-size:13px">源表: ' + escapeHtml(srcTableName) + '</label>';
+  html += '<select id="vfk-src-col" style="width:100%;margin-top:6px;padding:6px;border:1px solid var(--border);border-radius:var(--radius)">';
+  srcCols.forEach(function(c) { html += '<option value="' + escapeHtml(c.column_name) + '">' + escapeHtml(c.column_name) + '</option>'; });
+  html += '</select></div>';
+  html += '<div style="display:flex;align-items:center;padding-top:24px">→</div>';
+  html += '<div style="flex:1"><label style="font-weight:600;font-size:13px">目标表: ' + escapeHtml(tgtTableName) + '</label>';
+  html += '<select id="vfk-tgt-col" style="width:100%;margin-top:6px;padding:6px;border:1px solid var(--border);border-radius:var(--radius)">';
+  tgtCols.forEach(function(c) { html += '<option value="' + escapeHtml(c.column_name) + '">' + escapeHtml(c.column_name) + '</option>'; });
+  html += '</select></div>';
+  html += '</div>';
+  html += '<div style="margin-top:12px"><label style="font-weight:600;font-size:13px">外键名称（可选）</label>';
+  html += '<input id="vfk-name" style="width:100%;margin-top:6px;padding:6px;border:1px solid var(--border);border-radius:var(--radius)" placeholder="如 fk_order_customer"></div>';
+  html += '</div>';
+
+  openModal('创建虚拟外键', html,
+    '<button class="btn btn-primary" onclick="doCreateVFK(' + srcModelId + ',' + tgtModelId + ')">确认创建</button>' +
+    '<button class="btn btn-outline" onclick="closeModal()">取消</button>'
+  );
+}
+
+async function doCreateVFK(srcModelId, tgtModelId) {
+  var srcCol = document.getElementById('vfk-src-col').value;
+  var tgtCol = document.getElementById('vfk-tgt-col').value;
+  var fkName = document.getElementById('vfk-name').value.trim();
+  try {
+    await api.post('/models/' + srcModelId + '/virtual-foreign-keys', {
+      column_name: srcCol,
+      ref_model_id: tgtModelId,
+      ref_column_name: tgtCol,
+      fk_name: fkName || undefined
+    });
+    toast('虚拟外键创建成功', 'success');
+    closeModal();
+    // Exit connect mode
+    diagramState.connectMode = false;
+    updateConnectModeUI();
+    loadDiagram();
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 function fitDiagram() { if (diagramState.cy) diagramState.cy.fit(undefined, 50); }
 
-function addColumnOnDiagram(modelId) {
-  var input = prompt('添加字段\n格式: 字段名,类型\n类型: ' + ['BIGINT','INT','VARCHAR','DECIMAL','FLOAT','DOUBLE','DATE','DATETIME','TIMESTAMP','TEXT','BOOLEAN','JSON'].join(','));
-  if (!input) return;
-  var parts = input.split(',').map(function(s) { return s.trim(); });
-  if (parts.length < 2) { toast('至少需要字段名和类型', 'error'); return; }
-  api.get('/models/' + modelId).then(function(r) {
-    var cols = r.data.columns || [];
-    cols.push({ ordinal: cols.length + 1, column_name: parts[0], logical_type: parts[1].toUpperCase(), nullable: true, is_primary_key: false, default_value: '', comment: parts[2] || '', type_length: null, type_scale: null });
-    api.put('/models/' + modelId + '/columns', { columns: cols }).then(function() { toast('字段已添加', 'success'); loadDiagram(); }).catch(function(e) { toast(e.message, 'error'); });
-  });
-}
-
-function addTableOnDiagram() {
-  var input = prompt('新建模型\n格式: 表名,备注');
-  if (!input) return;
-  var parts = input.split(',').map(function(s) { return s.trim(); });
-  if (!parts[0]) { toast('请输入表名', 'error'); return; }
-  api.post('/models', { table_name: parts[0], table_comment: parts[1] || '' }).then(function(r) {
-    api.post('/models/' + r.data.id + '/deploy', { schema_id: parseInt(diagramState.schemaId), dialect: 'MYSQL' }).then(function() { toast('模型已创建并部署', 'success'); loadDiagram(); }).catch(function() { toast('模型已创建', 'success'); loadDiagram(); });
-  }).catch(function(e) { toast(e.message, 'error'); });
-}
-
 window.loadDiagram = loadDiagram;
-window.setMode = setMode;
 window.fitDiagram = fitDiagram;
-window.addColumnOnDiagram = addColumnOnDiagram;
-window.addTableOnDiagram = addTableOnDiagram;
+window.onDiagramDBChange = onDiagramDBChange;
+window.toggleConnectMode = toggleConnectMode;
+window.doCreateVFK = doCreateVFK;
+window.deleteVFKFromDetail = deleteVFKFromDetail;

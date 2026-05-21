@@ -38,29 +38,120 @@ type tableDef struct {
 	FKs     []fkDef
 }
 
+var domainDBConfig = []struct {
+	DBName      string
+	Description string
+	Domain      string
+	SchemaNames []string
+}{
+	{DBName: "电商数据库", Description: "电商业务域", Domain: "电商", SchemaNames: []string{"ods", "dwd"}},
+	{DBName: "CRM数据库", Description: "客户关系管理域", Domain: "CRM", SchemaNames: []string{"ods", "dwd"}},
+	{DBName: "财务数据库", Description: "财务核算域", Domain: "财务", SchemaNames: []string{"ods", "dwd"}},
+	{DBName: "HR数据库", Description: "人力资源域", Domain: "HR", SchemaNames: []string{"ods", "dwd"}},
+	{DBName: "物流数据库", Description: "物流供应链域", Domain: "物流", SchemaNames: []string{"ods", "dwd"}},
+	{DBName: "分析数据库", Description: "数据分析域", Domain: "分析", SchemaNames: []string{"ods", "dwd"}},
+}
+
 func SeedDummyTables(db *gorm.DB) error {
 	defs := dummyTableDefs()
 
-	schemaID := ensureDummySchema(db)
-	if schemaID == 0 {
+	physicalSchemaID := ensureDummySchema(db)
+	if physicalSchemaID == 0 {
 		return fmt.Errorf("no schema available for deployment")
 	}
 
 	var adminID uint64 = 1
 	tx := db.Begin()
 
+	logicalDBs := make(map[string]*models.LogicalDatabase)
+	logicalSchemas := make(map[string]*models.LogicalSchema)
+	allLogicalSchemas := make([]*models.LogicalSchema, 0)
+
+	for _, dbc := range domainDBConfig {
+		ldb := models.LogicalDatabase{Name: dbc.DBName, Description: dbc.Description}
+		if tx.Where("name = ?", dbc.DBName).First(&ldb).Error != nil {
+			if err := tx.Create(&ldb).Error; err != nil {
+				tx.Rollback()
+				return fmt.Errorf("create logical db %s: %w", dbc.DBName, err)
+			}
+		}
+		logicalDBs[dbc.Domain] = &ldb
+
+		for _, sn := range dbc.SchemaNames {
+			key := dbc.Domain + "/" + sn
+			ls := models.LogicalSchema{DatabaseID: ldb.ID, Name: sn, Description: dbc.Domain + " " + sn}
+			if tx.Where("database_id = ? AND name = ?", ldb.ID, sn).First(&ls).Error != nil {
+				if err := tx.Create(&ls).Error; err != nil {
+					tx.Rollback()
+					return fmt.Errorf("create logical schema %s: %w", key, err)
+				}
+			}
+			logicalSchemas[key] = &ls
+			allLogicalSchemas = append(allLogicalSchemas, &ls)
+		}
+	}
+
 	modelIDs := make(map[string]uint64)
 	tableOrder := make([]string, 0, len(defs))
 
+	domainTableCounts := make(map[string]int)
+	for _, def := range defs {
+		domainTableCounts[def.Domain]++
+	}
+
+	schemaIndex := make(map[string]int)
+	for _, dbc := range domainDBConfig {
+		schemaIndex[dbc.Domain] = 0
+	}
+
+	schemaTableLimit := make(map[string]int)
+	for _, dbc := range domainDBConfig {
+		total := domainTableCounts[dbc.Domain]
+		n := len(dbc.SchemaNames)
+		for i, sn := range dbc.SchemaNames {
+			perSchema := total / n
+			if i < total%n {
+				perSchema++
+			}
+			key := dbc.Domain + "/" + sn
+			schemaTableLimit[key] = perSchema
+		}
+	}
+
+	schemaTableCounts := make(map[string]int)
+
 	for name, def := range defs {
+		schemas := getSchemasForDomain(def.Domain)
+		si := schemaIndex[def.Domain] % len(schemas)
+		sk := def.Domain + "/" + schemas[si]
+		if schemaTableCounts[sk] >= schemaTableLimit[sk] {
+			si = (si + 1) % len(schemas)
+			sk = def.Domain + "/" + schemas[si]
+		}
+		schemaIndex[def.Domain] = si + 1
+		schemaTableCounts[sk]++
+
+		s := logicalSchemas[sk]
+		if s == nil {
+			tx.Rollback()
+			return fmt.Errorf("schema not found: %s", sk)
+		}
+		ldb := logicalDBs[def.Domain]
+		if ldb == nil {
+			tx.Rollback()
+			return fmt.Errorf("logical db not found for domain: %s", def.Domain)
+		}
+
 		var exist models.LogicalModel
-		if tx.Where("table_name = ?", name).First(&exist).Error == nil {
+		if tx.Where("schema_id = ? AND table_name = ?", s.ID, name).First(&exist).Error == nil {
 			modelIDs[name] = exist.ID
 			tableOrder = append(tableOrder, name)
 			continue
 		}
 
 		m := models.LogicalModel{
+			DatabaseID:   ldb.ID,
+			SchemaID:     s.ID,
 			TabName:      name,
 			TableComment: fmt.Sprintf("[%s] %s", def.Domain, def.Comment),
 			TableStatus:  "PUBLISHED",
@@ -109,10 +200,10 @@ func SeedDummyTables(db *gorm.DB) error {
 
 		dep := models.ModelDeployment{
 			ModelID:  m.ID,
-			SchemaID: schemaID,
+			SchemaID: physicalSchemaID,
 			Dialect:  "MYSQL",
 		}
-		tx.Where("model_id = ? AND schema_id = ?", m.ID, schemaID).Delete(&models.ModelDeployment{})
+		tx.Where("model_id = ? AND schema_id = ?", m.ID, physicalSchemaID).Delete(&models.ModelDeployment{})
 		if err := tx.Create(&dep).Error; err != nil {
 			tx.Rollback()
 			return fmt.Errorf("deploy %s: %w", name, err)
@@ -145,16 +236,51 @@ func SeedDummyTables(db *gorm.DB) error {
 		}
 	}
 
+	instanceMappingCount := int64(0)
+	tx.Model(&models.DatabaseInstanceMapping{}).Count(&instanceMappingCount)
+	if instanceMappingCount == 0 {
+		var dummyInst models.DatasourceInstance
+		tx.Where("type = ?", "MYSQL").First(&dummyInst)
+		if dummyInst.ID > 0 {
+			for _, dbc := range domainDBConfig {
+				ldb := logicalDBs[dbc.Domain]
+				mapping := models.DatabaseInstanceMapping{
+					DatabaseID: ldb.ID,
+					InstanceID: dummyInst.ID,
+				}
+				tx.Where("database_id = ? AND instance_id = ?", ldb.ID, dummyInst.ID).Delete(&models.DatabaseInstanceMapping{})
+				tx.Create(&mapping)
+			}
+		}
+	}
+
 	tx.Commit()
-	fmt.Printf("Seeded %d tables across 6 domains\n", len(modelIDs))
+	fmt.Printf("Seeded %d tables across %d logical databases\n", len(modelIDs), len(domainDBConfig))
 	return nil
+}
+
+func getSchemasForDomain(domain string) []string {
+	for _, d := range domainDBConfig {
+		if d.Domain == domain {
+			return d.SchemaNames
+		}
+	}
+	return []string{"default"}
 }
 
 func ensureDummySchema(db *gorm.DB) uint64 {
 	var inst models.DatasourceInstance
 	db.Where("type = ?", "MYSQL").First(&inst)
 	if inst.ID == 0 {
-		return 0
+		inst = models.DatasourceInstance{
+			Name:       "dummy-mysql",
+			Type:       "MYSQL",
+			Host:       "127.0.0.1",
+			Port:       3306,
+			Credential: `{"user":"root","password":"rosetta123"}`,
+			Status:     "ACTIVE",
+		}
+		db.Create(&inst)
 	}
 	var schema models.DatasourceSchema
 	db.Where("instance_id = ? AND schema_name = ?", inst.ID, "dummy_erp").First(&schema)
@@ -165,6 +291,7 @@ func ensureDummySchema(db *gorm.DB) uint64 {
 	return schema.ID
 }
 
+func intPtr(i int) *int { return &i }
 func dummyTableDefs() map[string]tableDef {
 	return map[string]tableDef{
 		// ===== E-COMMERCE (25 tables) =====
@@ -1334,5 +1461,3 @@ func dummyTableDefs() map[string]tableDef {
 		},
 	}
 }
-
-func intPtr(i int) *int { return &i }

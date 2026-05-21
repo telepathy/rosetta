@@ -77,7 +77,7 @@ rosetta/
 │   ├── models/      # 14 个数据模型
 │   ├── service/     # 7 个业务服务
 │   ├── handler/     # 7 个路由处理器
-│   ├── middleware/  # JWT + RBAC + Audit
+│   ├── middleware/  # JWT 认证 + Audit 审计
 │   ├── ddl/         # DDL 渲染引擎 (MySQL + GaussDB)
 │   └── utils/       # JWT + 响应格式
 └── frontend/

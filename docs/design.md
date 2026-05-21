@@ -34,6 +34,20 @@
 新模式：平台定义什么 → 数据库部署什么（主动管控）
 ```
 
+### 1.2 三层逻辑模型（Logical DB → Logical Schema → Table）
+
+平台采用 **三层逻辑模型** 来组织数据表：
+
+```
+逻辑数据库 (LogicalDatabase)        ← 业务域划分，如"电商数据库"、"HR数据库"
+    └── 逻辑 Schema (LogicalSchema)  ← 数据层级划分，如 ods/dwd/dws
+        └── 表 (LogicalModel)       ← 实际表定义（原逻辑模型）
+```
+
+- 每个表必须归属于一个逻辑库和 Schema
+- 一个逻辑库可以映射到多个物理数据源实例（DatasourceInstance），用于部署
+- 物理层（DatasourceInstance / DatasourceSchema）保持不变，负责实际的 DDL 执行
+
 ### 1.2 小而美原则
 
 | 原则 | 说明 |
@@ -240,26 +254,26 @@
 #### 4.2.1 整体布局
 
 ```
-┌─ Schema 树 ──────────────────────┬─ 表编辑主区域 ─────────────────────────┐
-│                                   │                                        │
-│  📁 数据源实例                     │ 表名: user_order          数据层级: ods │
-│   📁 mysql-a                     │ 方言: MySQL                            │
-│    📁 ods                        │                                        │
-│     📄 user_order    ◄ active   │ ┌─ 字段 ─┬─ 约束 ─┬─ 索引 ─┬─ DDL 预览 ┐│
-│     📄 user_info                 │ │                                    │ │
-│    📁 dwd                        │ │ ┌────┬────────┬────┬────┬────┬──┐ │ │
-│     📄 dwd_user_order            │ │ │序号│字段名   │类型 │非空│注释│操作│ │ │
-│   📁 gaussdb-b                   │ │ ├────┼────────┼────┼────┼────┼──┤ │ │
-│    📁 dws                        │ │ │ 1  │id      │BIG…│ ☑  │主键│✏️🗑️│ │ │
-│     📄 dws_sales_summary         │ │ │ 2  │user_id │BIG…│ ☑  │用… │✏️🗑️│ │ │
-│                                   │ │ │ 3  │amount  │DEC…│ ☑  │金… │✏️🗑️│ │ │
-│                                   │ │ │ 4  │status  │VAR…│ ☑  │状… │✏️🗑️│ │ │
-│  [+ 新建表]  [+ 反向工程]         │ │ └────┴────────┴────┴────┴────┴──┘ │ │
-│                                   │ │ [+ 添加字段]                       │ │
-│                                   │ └────────────────────────────────────┘ │
-│                                   │                                        │
-│                                   │ [保存] [生成 DDL] [部署到实例]          │
-└───────────────────────────────────┴────────────────────────────────────────┘
+┌─ 模型管理 ───────────────────┬─ 表编辑主区域 ─────────────────────────┐
+│                               │                                        │
+│  📁 电商数据库                 │ 表名: user_order                       │
+│   📁 ods                      │ 逻辑库: 电商数据库 / Schema: ods       │
+│    📄 user_order    ◄ active  │                                        │
+│    📄 user_info               │ ┌─ 字段 ─┬─ 约束 ─┬─ 索引 ─┬─ DDL 预览 ┐│
+│   📁 dwd                      │ │                                    │ │
+│    📄 dwd_user_order          │ │ ┌────┬────────┬────┬────┬────┬──┐ │ │
+│  📁 CRM 数据库                │ │ │序号│字段名   │类型 │非空│注释│操作│ │ │
+│   📁 ods                      │ │ ├────┼────────┼────┼────┼────┼──┤ │ │
+│  📁 财务数据库                │ │ │ 1  │id      │BIG…│ ☑  │主键│✏️🗑️│ │ │
+│                               │ │ │ 2  │user_id │BIG…│ ☑  │用… │✏️🗑️│ │ │
+│  [+ 新建表]  [+ 反向工程]     │ │ │ 3  │amount  │DEC…│ ☑  │金… │✏️🗑️│ │ │
+│                               │ │ │ 4  │status  │VAR…│ ☑  │状… │✏️🗑️│ │ │
+│                               │ │ └────┴────────┴────┴────┴────┴──┘ │ │
+│                               │ │ [+ 添加字段]                       │ │
+│                               │ └────────────────────────────────────┘ │
+│                               │                                        │
+│                               │ [保存] [生成 DDL] [部署到实例]          │
+└───────────────────────────────┴────────────────────────────────────────┘
 ```
 
 #### 4.2.2 四个 Tab 页详情
@@ -333,15 +347,15 @@ CREATE TABLE `user_order` (
 
 #### 4.3.1 ER 图（`#/diagram`）
 
-使用 **Cytoscape.js**（本地 vendored，664KB）渲染 Schema 级 ER 图：
+使用 **Cytoscape.js**（本地 vendored）渲染逻辑 Schema 级 ER 图：
 
-- **自动布局**：`breadthfirst` 算法，有向图分层排列，根表在左，被引用表在右
-- **表节点**：圆角矩形卡片，显示表名、列数、字段列表（字段名+类型+PK/FK 标记）
-- **关系连线**：贝塞尔曲线 + 箭头 + 列名标签，自引用边自动跳过
+- **逻辑库 + Schema 选择**：两级级联下拉框，先选逻辑数据库，再选该库下的逻辑 Schema
+- **自动布局**：BFS 层次计算 + 手动定位，有向图根据外键关系分层排列，根表在上，被引用表在下
+- **表节点**：圆角矩形，仅显示表名（140×40px），点击后在右侧详情面板显示字段、类型、键、可空性等信息
+- **关系连线**：贝塞尔曲线 + 三角箭头，自引用边自动跳过
 - **缩放平移**：滚轮缩放 + 拖拽平移，Cytoscape 原生支持
-- **点击交互**：浏览模式下点击表节点跳转到模型详情页
-- **编辑模式**：支持 FK 模式下点击两个表创建外键关系
-- **高度计算**：根据字段数量动态计算节点高度（替代已废弃的 `height: 'label'`）
+- **点击交互**：点击表节点选中高亮并加载详情面板；点击空白区取消选中
+- **滚动加载**：模型详情通过异步批量请求获取（每批 8 个），避免大数据量下页面卡顿
 
 #### 4.3.2 结构图 API
 
@@ -350,12 +364,13 @@ CREATE TABLE `user_order` (
 | 端点 | 说明 |
 |------|------|
 | `GET /api/models/:id/structure-diagram` | 单表结构数据（字段+PK/FK标记+索引+外键） |
-| `GET /api/schemas/:id/er-diagram` | Schema ER 图数据（tables + edges） |
+| `GET /api/logical-schemas/{id}/er-diagram` | 逻辑 Schema ER 图数据（tables + edges） |
 
 #### 4.3.3 数据库文档汇编页（`#/docs`）
 
 以数据字典形式展示所有模型的完整参考文档：
-- 表名、备注、状态
+- 按逻辑数据库分组展示，每个库用彩色背景标题区分
+- 表名、备注、状态、所属 Schema
 - 字段列表（序号、字段名、类型、非空、主键、默认值、备注）
 - 索引和外键详情
 - 可折叠的 DDL 预览
@@ -548,6 +563,8 @@ CREATE TABLE datasource_schema (
 -- 逻辑模型（表定义 IR，方言无关）
 CREATE TABLE logical_model (
   id            BIGINT PRIMARY KEY AUTO_INCREMENT,
+  database_id   BIGINT        NOT NULL COMMENT '所属逻辑数据库ID',
+  schema_id     BIGINT        NOT NULL COMMENT '所属逻辑Schema ID',
   table_name    VARCHAR(256)  NOT NULL COMMENT '表名（snake_case）',
   table_comment VARCHAR(512)  COMMENT '表注释',
   table_status  VARCHAR(32)   NOT NULL DEFAULT 'DRAFT' COMMENT 'DRAFT, PUBLISHED, DEPRECATED',
@@ -556,7 +573,8 @@ CREATE TABLE logical_model (
   created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_by    BIGINT        COMMENT '更新人ID',
   updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_table_name (table_name)
+  KEY idx_database_id (database_id),
+  UNIQUE KEY uk_schema_table (schema_id, table_name)
 ) COMMENT '逻辑模型';
 
 -- 字段定义
@@ -729,50 +747,50 @@ function hasPermission(userId, modelId, requiredPermission):
     return false
 ```
 
----
+### 5.5 逻辑数据库
 
-## 6. API 设计
+```sql
+-- 逻辑数据库（业务域划分）
+CREATE TABLE logical_database (
+  id            BIGINT PRIMARY KEY AUTO_INCREMENT,
+  name          VARCHAR(128)  NOT NULL COMMENT '逻辑数据库名称',
+  description   VARCHAR(512)  COMMENT '描述信息',
+  created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_db_name (name)
+) COMMENT '逻辑数据库';
+```
 
-### 6.1 认证
+### 5.6 逻辑 Schema 与实例映射
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/auth/login` | 登录，返回 JWT Token |
-| POST | `/api/auth/logout` | 登出 |
-| GET | `/api/auth/me` | 获取当前用户信息及权限 |
+```sql
+-- 逻辑 Schema（数据层级划分，隶属于逻辑数据库）
+CREATE TABLE logical_schema (
+  id            BIGINT PRIMARY KEY AUTO_INCREMENT,
+  database_id   BIGINT        NOT NULL COMMENT '所属逻辑数据库ID',
+  name          VARCHAR(128)  NOT NULL COMMENT 'Schema名称，如 ods/dwd/dws',
+  description   VARCHAR(512)  COMMENT '描述信息',
+  created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_db_schema_name (database_id, name)
+) COMMENT '逻辑Schema';
 
-### 6.2 用户与角色管理
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/users` | 用户列表（分页） |
-| POST | `/api/users` | 创建用户 |
-| PUT | `/api/users/{id}` | 更新用户信息 |
-| PUT | `/api/users/{id}/password` | 重置密码 |
-| PUT | `/api/users/{id}/status` | 启用/禁用用户 |
-| GET | `/api/roles` | 角色列表 |
-| PUT | `/api/users/{id}/roles` | 为用户分配角色 |
-| GET | `/api/roles/{id}/model-permissions` | 获取角色的模型权限矩阵 |
-| PUT | `/api/roles/{id}/model-permissions` | 更新角色的模型权限矩阵 |
-
-### 6.3 数据源实例
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/instances` | 实例列表 |
-| POST | `/api/instances` | 注册实例 |
-| PUT | `/api/instances/{id}` | 更新实例 |
-| DELETE | `/api/instances/{id}` | 删除实例 |
-| POST | `/api/instances/{id}/test` | 测试连接 |
-| GET | `/api/instances/{id}/schemas` | 实例下的 Schema 列表 |
-| POST | `/api/instances/{id}/schemas` | 创建 Schema |
+-- 逻辑数据库到物理数据源实例的映射
+CREATE TABLE database_instance_mapping (
+  id            BIGINT PRIMARY KEY AUTO_INCREMENT,
+  database_id   BIGINT        NOT NULL COMMENT '逻辑数据库ID',
+  instance_id   BIGINT        NOT NULL COMMENT '物理数据源实例ID',
+  created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_db_inst (database_id, instance_id)
+) COMMENT '逻辑数据库-实例映射';
+```
 
 ### 6.4 逻辑模型
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/models` | 逻辑模型列表（分页 + 搜索 + 权限过滤） |
-| POST | `/api/models` | 创建逻辑模型 |
+| GET | `/api/models?database_id=&schema_id=&keyword=&page=` | 逻辑模型列表（分页 + 按逻辑库/Schema 筛选 + 搜索） |
+| POST | `/api/models` | 创建逻辑模型（需指定 database_id + schema_id） |
 | GET | `/api/models/{id}` | 逻辑模型详情（含字段/约束/索引） |
 | PUT | `/api/models/{id}` | 更新逻辑模型基本信息 |
 | DELETE | `/api/models/{id}` | 删除逻辑模型 |
@@ -809,7 +827,7 @@ function hasPermission(userId, modelId, requiredPermission):
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/models/{id}/structure-diagram` | 单表结构图数据 |
-| GET | `/api/schemas/{id}/er-diagram` | Schema 级 ER 图数据 |
+| GET | `/api/logical-schemas/{id}/er-diagram` | 逻辑 Schema 级 ER 图数据 |
 
 ### 6.9 字典
 
@@ -825,7 +843,21 @@ function hasPermission(userId, modelId, requiredPermission):
 | DELETE | `/api/dicts/{id}/items/{itemId}` | 删除条目 |
 | PUT | `/api/dicts/{id}/items/order` | 批量更新条目排序 |
 
----
+### 6.10 逻辑数据库管理
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/databases` | 逻辑数据库列表 |
+| POST | `/api/databases` | 创建逻辑数据库 |
+| GET | `/api/databases/{id}` | 逻辑数据库详情 |
+| PUT | `/api/databases/{id}` | 更新逻辑数据库 |
+| DELETE | `/api/databases/{id}` | 删除逻辑数据库 |
+| GET | `/api/databases/{id}/schemas` | 逻辑库下的 Schema 列表 |
+| POST | `/api/databases/{id}/schemas` | 创建逻辑 Schema |
+| DELETE | `/api/databases/{id}/schemas/{schemaId}` | 删除逻辑 Schema |
+| GET | `/api/databases/{id}/instances` | 逻辑库已映射的实例列表 |
+| POST | `/api/databases/{id}/instances` | 映射实例到逻辑库 |
+| DELETE | `/api/databases/{id}/instances/{instanceId}` | 取消实例映射 |
 
 ## 7. 技术选型
 
@@ -903,128 +935,3 @@ function hasPermission(userId, modelId, requiredPermission):
    - 实例列表 + 详情前端页面
 
 4. 全局布局
-   - Ant Design Pro Layout（侧边栏 + 顶栏）
-   - 菜单配置 + 路由
-```
-
-### Phase 2：核心功能 — 表结构编辑器（Day 8-14）
-
-```
-1. 逻辑模型 CRUD 后端
-   - 模型基本信息
-   - 字段/约束/索引 CRUD
-
-2. 表结构编辑器前端
-   - Tab 1：字段可编辑表格（内联编辑 + 拖拽排序）
-   - Tab 2：主键/外键约束配置
-   - Tab 3：索引配置
-   - Tab 4：DDL 预览面板（代码高亮 + 方言切换）
-
-3. DDL 渲染引擎
-   - MySqlDdlRenderer
-   - GaussDbDdlRenderer
-   - 类型映射表驱动
-
-4. 字典维护
-   - 左侧树 + 右侧编辑器
-   - 字典条目表格编辑
-   - 类型映射表预置数据
-```
-
-### Phase 3：可视化 + 部署（Day 15-21）
-
-```
-1. 单表结构图（G6 自定义节点）
-2. Schema 级 ER 图（dagre 自动布局）
-3. 角色-模型权限矩阵页面
-   - 按角色授权
-   - 读/写权限勾选
-4. 模型列表按用户权限过滤
-5. 反向工程（JDBC 采集 → 填充逻辑模型）
-6. 部署执行（DDL 发送到目标数据库实例）
-```
-
-### Phase 4：收尾与打磨（Day 22-28）
-
-```
-1. 部署历史记录查询
-2. 平台定义 vs 数据库实际差异对比（一致性校验）
-3. 全局错误处理 + 操作日志
-4. 性能优化（N+1 查询、ESLint 清理）
-5. Docker Compose 一键部署脚本
-6. README + 部署文档
-```
-
----
-
-## 附录 A：GaussDB M 模式注意事项
-
-1. **GaussDB M 模式兼容 MySQL 语法**，大部分 MySQL DDL 可直接执行，但以下需要适配：
-   - 建表尾缀 `ENGINE=InnoDB` 需去掉
-   - `AUTO_INCREMENT` 用 `GENERATED BY DEFAULT AS IDENTITY` 替代
-   - 列注释和表注释语法差异（`COMMENT ON` 独立语句）
-   - `DATETIME` 类型映射为 `TIMESTAMP`
-   - `TEXT` 类型映射为 `CLOB`
-2. **反向工程采集**：GaussDB M 提供 JDBC 驱动，`DatabaseMetaData` API 可用，与 MySQL 兼容
-3. **建议每个方言的差异用独立的 DdlRenderer 策略实现**，不要在一套代码里用 `if/else` 分支撑
-
-## 附录 B：与原始"大而全"方案的差异
-
-| 维度 | 原始方案 | Rosetta 方案 |
-|------|----------|-------------|
-| 定位 | 观测型治理平台（被动） | DDL 源头管控平台（主动） |
-| P0 模块 | 元数据采集、数据质量、数据目录 | 字典维护、表结构编辑器、可视化、RBAC |
-| 元数据来源 | 全量自动采集 | 平台定义为 Source of Truth，采集仅做反向工程和一致性校验 |
-| 用户系统 | 未涉及 | RBAC 模型，角色-模型粒度的 READ/WRITE 权限 |
-| 质量监控 | P0（MVP 必备） | P1（表结构纳管后再补） |
-| 数据血缘 | P1 | P2 |
-| 数据库方言 | 仅提及 MySQL、Hive | GaussDB M + MySQL，含完整映射差异表 |
-| 交付周期 | 6 个月（四阶段） | 4 周 MVP（聚焦 UI 可操作的闭环） |
-
----
-
-## 附录 C：Cytoscape.js 本地化方案
-
-### 为什么不用 CDN
-
-1. CDN 可能被墙或加载超时，导致页面白屏
-2. `cytoscape-dagre` 插件是 webpack 打包产物，依赖 `require("dagre")`，在普通 `<script>` 标签下不工作
-
-### 最终方案
-
-```
-frontend/js/vendor/
-├── cytoscape.min.js    (365KB) — 从 jsdelivr CDN 下载到本地
-├── dagre.min.js        (278KB) — 已废弃，breadthfirst 布局不需要
-└── cytoscape-dagre.js   (13KB) — 已废弃，不兼容浏览器环境
-```
-
-- 使用 Cytoscape.js 内置的 `breadthfirst` 布局，零外部布局依赖
-- 适合有向图（FK 关系有明确方向），自动分层排列
-- 自引用边（`product_category.parent_id → product_category.id`）自动跳过
-
-### 节点高度计算
-
-Cytoscape v3.30+ 废弃了 `height: 'label'`，改为根据标签行数动态计算：
-
-```js
-'height': function(ele) { return ele.data('nodeHeight') || 200; }
-// nodeHeight = 标签行数 * 18 + 24 (padding)
-```
-
-## 附录 D：100 表 Dummy ERP 系统
-
-```bash
-cd backend && ./rosetta-server --seed-dummy
-```
-
-| 域 | 表数 | 典型示例 |
-|----|:--:|----------|
-| 电商 | 20 | product, order, order_item, inventory, coupon, refund |
-| CRM | 17 | customer, account, contact, lead, opportunity, contract |
-| 财务 | 15 | gl_account, gl_journal, ap_invoice, ar_invoice, budget |
-| HR | 17 | employee, department, position, salary, attendance, payroll |
-| 物流 | 15 | warehouse, stock, shipment, purchase_order, receiving |
-| 分析 | 17 | report_config, dashboard, kpi_definition, etl_job, data_lineage |
-
-首次运行创建 101 张表、582 个字段、103 个外键，全部部署到 `dummy_erp` Schema。

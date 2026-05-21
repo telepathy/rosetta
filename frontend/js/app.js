@@ -25,12 +25,7 @@ function closeModal(e) {
 }
 
 function btnSm(label, fn, cls) {
-  var id = 'btn_' + Math.random().toString(36).slice(2);
-  window[id] = fn;
-  return '<button class="btn btn-sm ' + (cls || 'btn-outline') + '" onclick="window.' + id + '()">' + label + '</button>';
-}
-
-function btnSmId(label, id, fn, cls) {
+  var id = 'b_' + Math.random().toString(36).slice(2, 8);
   window[id] = fn;
   return '<button class="btn btn-sm ' + (cls || 'btn-outline') + '" onclick="window.' + id + '()">' + label + '</button>';
 }
@@ -73,6 +68,7 @@ function sidebarHtml(currentPath) {
     ['/', '📊', '仪表盘'],
     ['/users', '👥', '用户管理'],
     ['/instances', '🗄️', '实例管理'],
+    ['/databases', '🗄️', '逻辑库'],
     ['/dicts', '📖', '字典维护'],
     ['/models', '📐', '模型管理'],
     ['/diagram', '📊', 'ER 图'],

@@ -41,14 +41,7 @@ const router = {
       }
       const app = document.getElementById('app');
       if (!app) return;
-      const result = await handler(params);
-      if (typeof result === 'string') {
-        app.innerHTML = result;
-      } else if (result && result.el) {
-        app.innerHTML = '';
-        app.appendChild(result.el);
-      }
-      if (result && result.afterRender) result.afterRender();
+      app.innerHTML = await handler(params);
     } catch (e) {
       var app = document.getElementById('app');
       if (app) app.innerHTML = '<div style="padding:40px;text-align:center"><h2>页面错误</h2><p style="color:#dc2626;margin:12px 0">' + e.message + '</p><pre style="text-align:left;background:#1e293b;color:#e2e8f0;padding:16px;border-radius:8px;overflow:auto;max-height:300px;font-size:12px">' + (e.stack || '').replace(/</g,'&lt;') + '</pre><br><a href="#/login" style="color:#4f46e5">返回登录</a></div>';

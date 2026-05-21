@@ -9,7 +9,6 @@ type AuditLog struct {
 	Action     string    `gorm:"size:64;not null" json:"action"`
 	Resource   string    `gorm:"size:256" json:"resource"`
 	ResourceID string    `gorm:"size:64" json:"resource_id"`
-	Detail     string    `gorm:"type:text" json:"detail"`
 	IP         string    `gorm:"size:64" json:"ip"`
 	CreatedAt  time.Time `json:"created_at"`
 }

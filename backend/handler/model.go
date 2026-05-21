@@ -24,8 +24,10 @@ func (h *ModelHandler) List(c *gin.Context) {
 	var page service.Pagination
 	_ = c.ShouldBindQuery(&page)
 	keyword := c.Query("keyword")
+	databaseID, _ := strconv.ParseUint(c.Query("database_id"), 10, 64)
+	schemaID, _ := strconv.ParseUint(c.Query("schema_id"), 10, 64)
 
-	items, total, err := h.modelSvc.List(page, keyword)
+	items, total, err := h.modelSvc.List(page, keyword, databaseID, schemaID)
 	if err != nil {
 		utils.InternalError(c, "查询模型列表失败")
 		return
@@ -55,7 +57,7 @@ func (h *ModelHandler) Get(c *gin.Context) {
 func (h *ModelHandler) Create(c *gin.Context) {
 	var req service.CreateModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		utils.BadRequest(c, "请填写表名")
+		utils.BadRequest(c, "请填写表名、所属逻辑库和Schema")
 		return
 	}
 
@@ -63,7 +65,7 @@ func (h *ModelHandler) Create(c *gin.Context) {
 	model, err := h.modelSvc.Create(req, userID.(uint64))
 	if err != nil {
 		if errors.Is(err, service.ErrTableNameExists) {
-			utils.BadRequest(c, "表名已存在")
+			utils.BadRequest(c, "该Schema下表名已存在")
 			return
 		}
 		utils.InternalError(c, "创建模型失败")
@@ -284,6 +286,56 @@ func (h *ModelHandler) ListDeployments(c *gin.Context) {
 	utils.Success(c, deps)
 }
 
+func (h *ModelHandler) CreateVirtualForeignKey(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		utils.BadRequest(c, "无效的模型ID")
+		return
+	}
+
+	var req service.VirtualForeignKeyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequest(c, "虚拟外键参数无效")
+		return
+	}
+
+	vfk, err := h.modelSvc.CreateVirtualForeignKey(id, req)
+	if err != nil {
+		utils.InternalError(c, "创建虚拟外键失败")
+		return
+	}
+	utils.SuccessWithMessage(c, "创建成功", vfk)
+}
+
+func (h *ModelHandler) DeleteVirtualForeignKey(c *gin.Context) {
+	modelID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	vfkID, _ := strconv.ParseUint(c.Param("vfkId"), 10, 64)
+
+	if err := h.modelSvc.DeleteVirtualForeignKey(modelID, vfkID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			utils.BadRequest(c, "虚拟外键不存在")
+			return
+		}
+		utils.InternalError(c, "删除虚拟外键失败")
+		return
+	}
+	utils.Success(c, nil)
+}
+
+func (h *ModelHandler) ListVirtualForeignKeys(c *gin.Context) {
+	schemaID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		utils.BadRequest(c, "无效的Schema ID")
+		return
+	}
+
+	vfks, err := h.modelSvc.ListVirtualForeignKeys(schemaID)
+	if err != nil {
+		utils.InternalError(c, "查询虚拟外键列表失败")
+		return
+	}
+	utils.Success(c, vfks)
+}
 func RegisterModelRoutes(r *gin.RouterGroup, h *ModelHandler, authSecret string) {
 	models := r.Group("/models")
 	models.Use(middleware.AuthRequired(authSecret))
@@ -302,6 +354,9 @@ func RegisterModelRoutes(r *gin.RouterGroup, h *ModelHandler, authSecret string)
 
 		models.POST("/:id/foreign-keys", h.CreateForeignKey)
 		models.DELETE("/:id/foreign-keys/:fkId", h.DeleteForeignKey)
+
+		models.POST("/:id/virtual-foreign-keys", h.CreateVirtualForeignKey)
+		models.DELETE("/:id/virtual-foreign-keys/:vfkId", h.DeleteVirtualForeignKey)
 
 		models.GET("/:id/ddl", h.RenderDDL)
 		models.POST("/:id/deploy", h.Deploy)

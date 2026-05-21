@@ -25,12 +25,7 @@ func (h *ReverseEngHandler) ListTables(c *gin.Context) {
 		return
 	}
 
-	schemaName := c.Query("schema")
-	if schemaName == "" {
-		schemaName = c.DefaultQuery("schema", "")
-	}
-
-	tables, err := h.revEngSvc.ListTables(id, schemaName)
+	tables, err := h.revEngSvc.ListTables(id, c.Query("schema"))
 	if err != nil {
 		utils.Error(c, 422, 422, err.Error())
 		return

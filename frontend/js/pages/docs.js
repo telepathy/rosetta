@@ -28,6 +28,8 @@ async function fetchAllDocs() {
     for (var i = 0; i < models.length; i++) {
       try {
         var d = (await api.get('/models/' + models[i].id)).data;
+        d.db_name = models[i].db_name;
+        d.schema_name = models[i].schema_name;
         allDetails.push(d);
       } catch(e) {}
     }
@@ -39,67 +41,82 @@ async function fetchAllDocs() {
 }
 
 function renderDocs(container, models) {
-  var html = '';
-  html += '<div style="margin-bottom:16px;color:var(--text-secondary)">共 <b>' + models.length + '</b> 个模型</div>';
-
+  var byDB = {};
   models.forEach(function(m) {
-    html += '<div class="card" style="margin-bottom:20px;page-break-inside:avoid">';
+    var dbName = m.db_name || '未分类';
+    if (!byDB[dbName]) byDB[dbName] = [];
+    byDB[dbName].push(m);
+  });
 
-    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--border)">';
-    html += '<div><h3 style="margin:0;font-size:16px">📐 ' + m.table_name + '</h3>';
-    html += '<div style="font-size:12px;color:var(--text-secondary);margin-top:4px">' + (m.table_comment || '无表备注') + '</div></div>';
-    html += '<div><span class="badge badge-info">' + (m.table_status || 'DRAFT') + '</span> ' +
-      '<span class="badge badge-gray">' + (m.source || 'MANUAL') + '</span></div>';
-    html += '</div>';
+  var html = '';
+  html += '<div style="margin-bottom:16px;color:var(--text-secondary)">共 <b>' + models.length + '</b> 个模型，<b>' + Object.keys(byDB).length + '</b> 个逻辑库</div>';
 
-    var cols = m.columns || [];
-    if (cols.length > 0) {
-      html += '<table><thead><tr><th style="width:40px">#</th><th>字段名</th><th>逻辑类型</th><th style="width:60px">非空</th><th style="width:60px">主键</th><th>默认值</th><th>备注</th></tr></thead><tbody>';
-      cols.forEach(function(col) {
-        var typeStr = col.logical_type;
-        if (col.type_length) { typeStr += '(' + col.type_length; if (col.type_scale) typeStr += ',' + col.type_scale; typeStr += ')'; }
-        html += '<tr>';
-        html += '<td>' + col.ordinal + '</td>';
-        html += '<td><strong>' + col.column_name + '</strong></td>';
-        html += '<td><code>' + typeStr + '</code></td>';
-        html += '<td>' + (col.nullable ? '' : '<span class="badge badge-warning">NOT NULL</span>') + '</td>';
-        html += '<td>' + (col.is_primary_key ? '🔑' : '') + '</td>';
-        html += '<td>' + (col.default_value || '-') + '</td>';
-        html += '<td style="color:var(--text-secondary)">' + (col.comment || '-') + '</td>';
-        html += '</tr>';
-      });
-      html += '</tbody></table>';
-    } else {
-      html += '<p style="color:var(--text-secondary);text-align:center;padding:20px">暂无字段定义</p>';
-    }
+  var dbKeys = Object.keys(byDB).sort();
+  dbKeys.forEach(function(dbName) {
+    var dbModels = byDB[dbName];
+    html += '<h3 style="margin:20px 0 12px 0;padding:8px 12px;background:#eef2ff;border-radius:var(--radius);color:var(--primary)">🗄 ' + escapeHtml(dbName) + ' (' + dbModels.length + ' 个模型)</h3>';
 
-    var indexes = m.indexes || [];
-    if (indexes.length > 0) {
-      html += '<div style="margin-top:12px;font-weight:600;font-size:13px">索引</div>';
-      html += '<table><thead><tr><th>名称</th><th>类型</th><th>列</th></tr></thead><tbody>';
-      indexes.forEach(function(idx) {
-        var icols = []; try { icols = JSON.parse(idx.columns); } catch(e) {}
-        var colStr = icols.map(function(c) { return c.name + (c.order === 'DESC' ? ' DESC' : ''); }).join(', ');
-        html += '<tr><td>' + idx.index_name + '</td><td>' + idx.index_type + '</td><td>' + colStr + '</td></tr>';
-      });
-      html += '</tbody></table>';
-    }
+    dbModels.forEach(function(m) {
+      html += '<div class="card" style="margin-bottom:20px;page-break-inside:avoid">';
 
-    var fks = m.foreign_keys || [];
-    if (fks.length > 0) {
-      html += '<div style="margin-top:12px;font-weight:600;font-size:13px">外键</div>';
-      html += '<table><thead><tr><th>外键名</th><th>列</th><th>引用表</th><th>引用列</th></tr></thead><tbody>';
-      fks.forEach(function(fk) {
-        html += '<tr><td>' + fk.fk_name + '</td><td>' + fk.column_name + '</td><td><a href="#/models/' + fk.ref_model_id + '" style="color:var(--primary)">' + fk.ref_table_name + '</a></td><td>' + fk.ref_column_name + '</td></tr>';
-      });
-      html += '</tbody></table>';
-    }
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--border)">';
+      html += '<div><h3 style="margin:0;font-size:16px">📐 ' + m.table_name + '</h3>';
+      html += '<div style="font-size:12px;color:var(--text-secondary);margin-top:4px">' + (m.table_comment || '无表备注') + '';
+      if (m.schema_name) html += ' | Schema: ' + escapeHtml(m.schema_name);
+      html += '</div></div>';
+      html += '<div><span class="badge badge-info">' + (m.table_status || 'DRAFT') + '</span> ' +
+        '<span class="badge badge-gray">' + (m.source || 'MANUAL') + '</span></div>';
+      html += '</div>';
 
-    html += '<details style="margin-top:12px"><summary style="cursor:pointer;color:var(--text-secondary);font-size:12px">DDL (MySQL)</summary>';
-    html += '<div class="json-view" id="ddldoc-' + m.id + '" style="margin-top:8px;max-height:300px">加载中...</div>';
-    html += '</details>';
+      var cols = m.columns || [];
+      if (cols.length > 0) {
+        html += '<table><thead><tr><th style="width:40px">#</th><th>字段名</th><th>逻辑类型</th><th style="width:60px">非空</th><th style="width:60px">主键</th><th>默认值</th><th>备注</th></tr></thead><tbody>';
+        cols.forEach(function(col) {
+          var typeStr = col.logical_type;
+          if (col.type_length) { typeStr += '(' + col.type_length; if (col.type_scale) typeStr += ',' + col.type_scale; typeStr += ')'; }
+          html += '<tr>';
+          html += '<td>' + col.ordinal + '</td>';
+          html += '<td><strong>' + col.column_name + '</strong></td>';
+          html += '<td><code>' + typeStr + '</code></td>';
+          html += '<td>' + (col.nullable ? '' : '<span class="badge badge-warning">NOT NULL</span>') + '</td>';
+          html += '<td>' + (col.is_primary_key ? '🔑' : '') + '</td>';
+          html += '<td>' + (col.default_value || '-') + '</td>';
+          html += '<td style="color:var(--text-secondary)">' + (col.comment || '-') + '</td>';
+          html += '</tr>';
+        });
+        html += '</tbody></table>';
+      } else {
+        html += '<p style="color:var(--text-secondary);text-align:center;padding:20px">暂无字段定义</p>';
+      }
 
-    html += '</div>';
+      var indexes = m.indexes || [];
+      if (indexes.length > 0) {
+        html += '<div style="margin-top:12px;font-weight:600;font-size:13px">索引</div>';
+        html += '<table><thead><tr><th>名称</th><th>类型</th><th>列</th></tr></thead><tbody>';
+        indexes.forEach(function(idx) {
+          var icols = []; try { icols = JSON.parse(idx.columns); } catch(e) {}
+          var colStr = icols.map(function(c) { return c.name + (c.order === 'DESC' ? ' DESC' : ''); }).join(', ');
+          html += '<tr><td>' + idx.index_name + '</td><td>' + idx.index_type + '</td><td>' + colStr + '</td></tr>';
+        });
+        html += '</tbody></table>';
+      }
+
+      var fks = m.foreign_keys || [];
+      if (fks.length > 0) {
+        html += '<div style="margin-top:12px;font-weight:600;font-size:13px">外键</div>';
+        html += '<table><thead><tr><th>外键名</th><th>列</th><th>引用表</th><th>引用列</th></tr></thead><tbody>';
+        fks.forEach(function(fk) {
+          html += '<tr><td>' + fk.fk_name + '</td><td>' + fk.column_name + '</td><td><a href="#/models/' + fk.ref_model_id + '" style="color:var(--primary)">' + fk.ref_table_name + '</a></td><td>' + fk.ref_column_name + '</td></tr>';
+        });
+        html += '</tbody></table>';
+      }
+
+      html += '<details style="margin-top:12px"><summary style="cursor:pointer;color:var(--text-secondary);font-size:12px">DDL (MySQL)</summary>';
+      html += '<div class="json-view" id="ddldoc-' + m.id + '" style="margin-top:8px;max-height:300px">加载中...</div>';
+      html += '</details>';
+
+      html += '</div>';
+    });
   });
 
   container.innerHTML = html;

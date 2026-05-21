@@ -21,6 +21,8 @@ func NewModelService(db *gorm.DB) *ModelService {
 type CreateModelRequest struct {
 	TableName    string `json:"table_name" binding:"required"`
 	TableComment string `json:"table_comment"`
+	DatabaseID   uint64 `json:"database_id" binding:"required"`
+	SchemaID     uint64 `json:"schema_id" binding:"required"`
 }
 
 type UpdateModelRequest struct {
@@ -67,6 +69,7 @@ type ModelDetailResponse struct {
 	Columns      []models.ModelColumn     `json:"columns"`
 	Indexes      []models.ModelIndex      `json:"indexes"`
 	ForeignKeys  []ForeignKeyWithRefName  `json:"foreign_keys"`
+	VirtualForeignKeys []VirtualFKWithRefName `json:"virtual_foreign_keys"`
 }
 
 type ForeignKeyWithRefName struct {
@@ -76,20 +79,28 @@ type ForeignKeyWithRefName struct {
 
 type ModelListItem struct {
 	models.LogicalModel
-	ColumnCount int `json:"column_count"`
+	ColumnCount int    `json:"column_count"`
+	DBName      string `json:"db_name,omitempty"`
+	SchemaName  string `json:"schema_name,omitempty"`
 }
 
 var (
 	ErrTableNameExists = errors.New("表名已存在")
 )
 
-func (s *ModelService) List(page Pagination, keyword string) ([]ModelListItem, int64, error) {
+func (s *ModelService) List(page Pagination, keyword string, databaseID, schemaID uint64) ([]ModelListItem, int64, error) {
 	page.Normalize()
 	var total int64
 	query := s.db.Model(&models.LogicalModel{})
 	if keyword != "" {
 		like := "%" + keyword + "%"
 		query = query.Where("table_name LIKE ? OR table_comment LIKE ?", like, like)
+	}
+	if databaseID > 0 {
+		query = query.Where("logical_model.database_id = ?", databaseID)
+	}
+	if schemaID > 0 {
+		query = query.Where("logical_model.schema_id = ?", schemaID)
 	}
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -105,6 +116,12 @@ func (s *ModelService) List(page Pagination, keyword string) ([]ModelListItem, i
 		var count int64
 		s.db.Model(&models.ModelColumn{}).Where("model_id = ?", m.ID).Count(&count)
 		items[i] = ModelListItem{LogicalModel: m, ColumnCount: int(count)}
+		// fetch db and schema names
+		var dbName, schemaName string
+		s.db.Model(&models.LogicalDatabase{}).Select("name").Where("id = ?", m.DatabaseID).First(&dbName)
+		s.db.Model(&models.LogicalSchema{}).Select("name").Where("id = ?", m.SchemaID).First(&schemaName)
+		items[i].DBName = dbName
+		items[i].SchemaName = schemaName
 	}
 	return items, total, nil
 }
@@ -147,21 +164,48 @@ func (s *ModelService) GetDetail(id uint64) (*ModelDetailResponse, error) {
 		}
 	}
 
+	// Fetch virtual foreign keys
+	var vfks []models.VirtualForeignKey
+	s.db.Where("model_id = ?", id).Find(&vfks)
+	vfkWithNames := make([]VirtualFKWithRefName, len(vfks))
+	vfkRefIDs := make([]uint64, 0, len(vfks))
+	for _, vfk := range vfks {
+		vfkRefIDs = append(vfkRefIDs, vfk.RefModelID)
+	}
+	vfkRefNames := make(map[uint64]string)
+	if len(vfkRefIDs) > 0 {
+		var refM []models.LogicalModel
+		s.db.Where("id IN ?", vfkRefIDs).Find(&refM)
+		for _, rm := range refM {
+			vfkRefNames[rm.ID] = rm.TabName
+		}
+	}
+	for i, vfk := range vfks {
+		vfkWithNames[i] = VirtualFKWithRefName{
+			VirtualForeignKey: vfk,
+			RefTableName:      vfkRefNames[vfk.RefModelID],
+			RefTableID:        vfk.RefModelID,
+		}
+	}
+
 	return &ModelDetailResponse{
-		LogicalModel: &model,
-		Columns:      columns,
-		Indexes:      indexes,
-		ForeignKeys:  fkWithNames,
+		LogicalModel:      &model,
+		Columns:           columns,
+		Indexes:           indexes,
+		ForeignKeys:       fkWithNames,
+		VirtualForeignKeys: vfkWithNames,
 	}, nil
 }
 
 func (s *ModelService) Create(req CreateModelRequest, userID uint64) (*models.LogicalModel, error) {
 	var exist models.LogicalModel
-	if err := s.db.Where("table_name = ?", req.TableName).First(&exist).Error; err == nil {
+	if err := s.db.Where("schema_id = ? AND table_name = ?", req.SchemaID, req.TableName).First(&exist).Error; err == nil {
 		return nil, ErrTableNameExists
 	}
 
 	model := models.LogicalModel{
+		DatabaseID:   req.DatabaseID,
+		SchemaID:     req.SchemaID,
 		TabName:      req.TableName,
 		TableComment: req.TableComment,
 		TableStatus:  "DRAFT",
@@ -297,6 +341,53 @@ func (s *ModelService) DeleteForeignKey(modelID, fkID uint64) error {
 	return result.Error
 }
 
+type VirtualForeignKeyRequest struct {
+	ColumnName    string `json:"column_name" binding:"required"`
+	RefModelID    uint64 `json:"ref_model_id" binding:"required"`
+	RefColumnName string `json:"ref_column_name" binding:"required"`
+	FkName        string `json:"fk_name"`
+}
+
+func (s *ModelService) CreateVirtualForeignKey(modelID uint64, req VirtualForeignKeyRequest) (*models.VirtualForeignKey, error) {
+	vfk := models.VirtualForeignKey{
+		ModelID:       modelID,
+		ColumnName:    req.ColumnName,
+		RefModelID:    req.RefModelID,
+		RefColumnName: req.RefColumnName,
+		FkName:        req.FkName,
+	}
+	if err := s.db.Create(&vfk).Error; err != nil {
+		return nil, err
+	}
+	return &vfk, nil
+}
+
+func (s *ModelService) DeleteVirtualForeignKey(modelID, vfkID uint64) error {
+	result := s.db.Where("id = ? AND model_id = ?", vfkID, modelID).Delete(&models.VirtualForeignKey{})
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return result.Error
+}
+
+type VirtualFKWithRefName struct {
+	models.VirtualForeignKey
+	RefTableName string `gorm:"-" json:"ref_table_name"`
+	RefTableID   uint64 `gorm:"-" json:"ref_table_id"`
+}
+
+func (s *ModelService) ListVirtualForeignKeys(schemaID uint64) ([]VirtualFKWithRefName, error) {
+	var vfks []VirtualFKWithRefName
+	s.db.Raw(`
+		SELECT vfk.*, ref.table_name as ref_table_name, ref.id as ref_table_id
+		FROM virtual_foreign_key vfk
+		JOIN logical_model src ON src.id = vfk.model_id
+		JOIN logical_model ref ON ref.id = vfk.ref_model_id
+		WHERE src.schema_id = ?
+	`, schemaID).Scan(&vfks)
+	return vfks, nil
+}
+
 func (s *ModelService) RenderDDL(modelID uint64, dialect string) (string, error) {
 	detail, err := s.GetDetail(modelID)
 	if err != nil {
@@ -307,17 +398,13 @@ func (s *ModelService) RenderDDL(modelID uint64, dialect string) (string, error)
 	}
 
 	refNames := make(map[uint64]string)
-	for _, fk := range detail.ForeignKeys {
+	fks := make([]models.ModelForeignKey, len(detail.ForeignKeys))
+	for i, fk := range detail.ForeignKeys {
 		refNames[fk.RefModelID] = fk.RefTableName
+		fks[i] = fk.ModelForeignKey
 	}
 
-	var indexes []models.ModelIndex
-	s.db.Where("model_id = ?", modelID).Find(&indexes)
-
-	var fks []models.ModelForeignKey
-	s.db.Where("model_id = ?", modelID).Find(&fks)
-
-	ir := ddl.BuildIR(detail.LogicalModel, detail.Columns, indexes, fks, refNames)
+	ir := ddl.BuildIR(detail.LogicalModel, detail.Columns, detail.Indexes, fks, refNames)
 
 	var renderer ddl.Renderer
 	switch dialect {

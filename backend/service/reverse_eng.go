@@ -154,6 +154,8 @@ type ImportRevEngRequest struct {
 	InstanceID uint64 `json:"instance_id" binding:"required"`
 	SchemaName string `json:"schema_name" binding:"required"`
 	TableName  string `json:"table_name" binding:"required"`
+	DatabaseID uint64 `json:"database_id" binding:"required"`
+	LogicalSchemaID uint64 `json:"logical_schema_id" binding:"required"`
 	CreatedBy  uint64 `json:"-"`
 }
 
@@ -164,13 +166,15 @@ func (s *ReverseEngService) Import(req ImportRevEngRequest) (*models.LogicalMode
 	}
 
 	var exist models.LogicalModel
-	if err := s.db.Where("table_name = ?", req.TableName).First(&exist).Error; err == nil {
+	if err := s.db.Where("schema_id = ? AND table_name = ?", req.LogicalSchemaID, req.TableName).First(&exist).Error; err == nil {
 		return nil, fmt.Errorf("表名 %s 已存在", req.TableName)
 	}
 
 	tx := s.db.Begin()
 
 	model := models.LogicalModel{
+		DatabaseID:   req.DatabaseID,
+		SchemaID:     req.LogicalSchemaID,
 		TabName:      req.TableName,
 		TableComment: preview.TableComment,
 		TableStatus:  "DRAFT",

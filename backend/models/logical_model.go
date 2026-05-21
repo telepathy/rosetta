@@ -4,7 +4,9 @@ import "time"
 
 type LogicalModel struct {
 	ID           uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
-	TabName      string    `gorm:"column:table_name;size:256;not null;uniqueIndex" json:"table_name"`
+	DatabaseID   uint64    `gorm:"not null;index" json:"database_id"`
+	SchemaID     uint64    `gorm:"not null;uniqueIndex:uk_schema_table" json:"schema_id"`
+	TabName      string    `gorm:"column:table_name;size:256;not null;uniqueIndex:uk_schema_table" json:"table_name"`
 	TableComment string    `gorm:"size:512" json:"table_comment"`
 	TableStatus  string    `gorm:"size:32;not null;default:DRAFT" json:"table_status"`
 	Source       string    `gorm:"size:32;not null;default:MANUAL" json:"source"`
@@ -77,4 +79,18 @@ type ModelDeployment struct {
 
 func (ModelDeployment) TableName() string {
 	return "model_deployment"
+}
+
+type VirtualForeignKey struct {
+	ID            uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
+	ModelID       uint64    `gorm:"not null;index:idx_vfk_model;uniqueIndex:uk_vfk_unique" json:"model_id"`
+	ColumnName    string    `gorm:"size:256;not null;uniqueIndex:uk_vfk_unique" json:"column_name"`
+	RefModelID    uint64    `gorm:"not null;uniqueIndex:uk_vfk_unique" json:"ref_model_id"`
+	RefColumnName string    `gorm:"size:256;not null;uniqueIndex:uk_vfk_unique" json:"ref_column_name"`
+	FkName        string    `gorm:"size:256" json:"fk_name"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+func (VirtualForeignKey) TableName() string {
+	return "virtual_foreign_key"
 }

@@ -60,7 +60,7 @@ func Init(cfg *config.DatabaseConfig) error {
 }
 
 func autoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&models.RbacUser{},
 		&models.RbacRole{},
 		&models.RbacUserRole{},
@@ -69,11 +69,45 @@ func autoMigrate(db *gorm.DB) error {
 		&models.DatasourceSchema{},
 		&models.DictDefinition{},
 		&models.DictItem{},
+		&models.LogicalDatabase{},
+		&models.LogicalSchema{},
+		&models.DatabaseInstanceMapping{},
 		&models.LogicalModel{},
 		&models.ModelColumn{},
 		&models.ModelIndex{},
 		&models.ModelForeignKey{},
 		&models.ModelDeployment{},
 		&models.AuditLog{},
-	)
+		&models.VirtualForeignKey{},
+			&models.VirtualForeignKey{},
+	); err != nil {
+		return err
+	}
+	return migrateExistingData(db)
+}
+
+func migrateExistingData(db *gorm.DB) error {
+	var modelCount int64
+	db.Model(&models.LogicalModel{}).Count(&modelCount)
+	if modelCount == 0 {
+		return nil
+	}
+
+	var dbCount int64
+	db.Model(&models.LogicalDatabase{}).Count(&dbCount)
+	if dbCount > 0 {
+		return nil
+	}
+
+	defDB := models.LogicalDatabase{Name: "默认数据库", Description: "迁移生成的默认逻辑数据库"}
+	if err := db.Create(&defDB).Error; err != nil {
+		return err
+	}
+	defSchema := models.LogicalSchema{DatabaseID: defDB.ID, Name: "default", Description: "迁移生成的默认Schema"}
+	if err := db.Create(&defSchema).Error; err != nil {
+		return err
+	}
+	db.Model(&models.LogicalModel{}).Where("database_id = 0").Update("database_id", defDB.ID)
+	db.Model(&models.LogicalModel{}).Where("schema_id = 0").Update("schema_id", defSchema.ID)
+	return nil
 }
